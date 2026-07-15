@@ -409,6 +409,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
+name = "lf-slots"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "crossbeam-utils",
+ "echeneis",
+ "loom",
+ "portable-atomic",
+ "shuttle",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -473,18 +485,6 @@ name = "mintex"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c505b3e17ed6b70a7ed2e67fbb2c560ee327353556120d6e72f5232b6880d536"
-
-[[package]]
-name = "nblf-indexstore"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "crossbeam-utils",
- "echeneis",
- "loom",
- "portable-atomic",
- "shuttle",
-]
 
 [[package]]
 name = "nu-ansi-term"
