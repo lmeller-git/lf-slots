@@ -33,7 +33,7 @@ categories = ["data-structures", "algorithms", "concurrency", "no-std"]
 rust-version = "1.85.0"
 
 [features]
-default = []
+default = ["std"]
 std = ["alloc"]
 alloc = []
 atomic-fallback = ["portable-atomic/fallback"]
