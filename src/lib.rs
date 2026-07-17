@@ -16,18 +16,17 @@ mod slot_alloc;
 mod storage;
 mod sync;
 
+pub use slot_alloc::SlotStorage;
+
 #[cfg(feature = "alloc")]
 use crate::storage::HeapStorage;
-use crate::{
-    slot_alloc::{SlotStorage, Storage},
-    storage::InlineStorage,
-};
+use crate::storage::{BooleanStorage, InlineStorage};
 
-pub struct InlineSlots<const N: usize>(Storage<InlineStorage<N>>);
+pub struct InlineSlots<const N: usize>(InlineStorage<BooleanStorage, N>);
 
 impl<const N: usize> InlineSlots<N> {
     pub fn new() -> Self {
-        Self(Storage::new(InlineStorage::new()))
+        Self(InlineStorage::new())
     }
 }
 
@@ -38,12 +37,12 @@ impl<const N: usize> Default for InlineSlots<N> {
 }
 
 #[cfg(feature = "alloc")]
-pub struct HeapSlots(Storage<HeapStorage>);
+pub struct HeapSlots(HeapStorage<BooleanStorage>);
 
 #[cfg(feature = "alloc")]
 impl HeapSlots {
     pub fn new(size: usize) -> Self {
-        Self(Storage::new(HeapStorage::new(size)))
+        Self(HeapStorage::new(size))
     }
 }
 

@@ -2,7 +2,7 @@ use std::{sync::Arc, thread};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use crossbeam_queue::ArrayQueue;
-use lf_slots::InlineSlots;
+use lf_slots::{InlineSlots, SlotStorage};
 
 const CAPACITY: usize = 2048;
 const TOTAL_OPS: usize = 120_000;

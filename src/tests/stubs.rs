@@ -3,7 +3,7 @@
 use alloc::{collections::VecDeque, vec::Vec};
 
 use crate::{
-    SlotStorage,
+    slot_alloc::SlotStorage,
     sync::{
         Arc,
         Condvar,
