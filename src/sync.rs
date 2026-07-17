@@ -15,7 +15,7 @@ mod shuttle_ {
     #[allow(unused_imports)]
     pub(crate) use shuttle::hint;
     pub(crate) use shuttle::{
-        sync::{Arc, Weak, atomic},
+        sync::{Arc, Condvar, Mutex, Weak, atomic},
         thread,
     };
 
@@ -50,7 +50,7 @@ mod loom_ {
     pub(crate) use loom::{
         cell,
         hint,
-        sync::{Arc, atomic},
+        sync::{Arc, Condvar, Mutex, atomic},
         thread,
     };
 }
@@ -82,6 +82,8 @@ mod core_ {
     pub(crate) use alloc::sync::{Arc, Weak};
     pub(crate) use core::hint;
     #[cfg(feature = "std")]
+    pub(crate) use std::sync::{Condvar, Mutex};
+    #[cfg(feature = "std")]
     pub(crate) use std::thread;
 
     pub(crate) use portable_atomic as atomic;
@@ -111,9 +113,11 @@ mod echeneis_ {
             }
         }
     }
-    #[cfg(eature = "alloc")]
+    #[cfg(feature = "alloc")]
     pub(crate) use alloc::sync::{Arc, Weak};
     pub(crate) use core::hint;
+    #[cfg(feature = "std")]
+    pub(crate) use std::sync::{Condvar, Mutex};
     #[cfg(feature = "std")]
     pub(crate) use std::thread;
 }

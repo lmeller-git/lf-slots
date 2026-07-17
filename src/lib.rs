@@ -3,16 +3,16 @@
 #![warn(unsafe_op_in_unsafe_fn)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
 #[cfg(feature = "std")]
 extern crate std;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests;
 
 use crate::sync::atomic::{AtomicBool, Ordering};
-
-#[cfg(feature = "alloc")]
-extern crate alloc;
 
 mod sync;
 
@@ -34,11 +34,19 @@ impl<const N: usize> StorageBackend for InlineStorage<N> {
     }
 }
 
+impl<const N: usize> Default for InlineStorage<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(feature = "alloc")]
 struct HeapStorage {
+    #[allow(unused_qualifications)]
     arr: alloc::boxed::Box<[AtomicBool]>,
 }
 
+#[cfg(feature = "alloc")]
 impl HeapStorage {
     fn new(size: usize) -> Self {
         Self {
@@ -148,6 +156,12 @@ impl<const N: usize> InlineSlots<N> {
     }
 }
 
+impl<const N: usize> Default for InlineSlots<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(feature = "alloc")]
 pub struct HeapSlots(Storage<HeapStorage>);
 
@@ -179,5 +193,67 @@ impl HeapSlots {
 
     pub fn capacity(&self) -> usize {
         self.0.capacity()
+    }
+}
+
+pub trait SlotStorage {
+    fn pull(&self) -> Option<usize>;
+    fn put(&self, index: usize) -> bool;
+    fn is_empty(&self) -> bool;
+    fn is_full(&self) -> bool;
+    fn len(&self) -> usize;
+    fn capacity(&self) -> usize;
+}
+
+impl<const N: usize> SlotStorage for InlineSlots<N> {
+    fn pull(&self) -> Option<usize> {
+        self.pull()
+    }
+
+    fn put(&self, index: usize) -> bool {
+        self.put(index)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn is_full(&self) -> bool {
+        self.is_full()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn capacity(&self) -> usize {
+        self.capacity()
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl SlotStorage for HeapSlots {
+    fn pull(&self) -> Option<usize> {
+        self.pull()
+    }
+
+    fn put(&self, index: usize) -> bool {
+        self.put(index)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn is_full(&self) -> bool {
+        self.is_full()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn capacity(&self) -> usize {
+        self.capacity()
     }
 }
