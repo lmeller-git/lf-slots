@@ -13,9 +13,34 @@ extern crate std;
 mod tests;
 
 mod slot_alloc;
+#[macro_use]
 mod storage;
 mod sync;
 
+pub use slot_alloc::{RawStorage, SlotHandle, StorageData, StorageExt};
+
 #[cfg(feature = "alloc")]
-use crate::storage::HeapStorage;
-use crate::storage::{BitsetStorage, ConcatStorage, InlineStorage, MaskedBitsetStorage};
+pub use crate::storage::HeapStorage;
+
+pub mod core {
+    pub use crate::storage::{
+        BitsetStorage,
+        ConcatStorage,
+        InlineStorage,
+        MaskedBitsetStorage,
+        full_shard_count,
+        tail_bits,
+    };
+}
+
+#[macro_export]
+macro_rules! define_inline_store {
+    ($name:ident, $ctor:ident, $n:expr) => {
+        pub(crate) type $name =
+            $crate::core::InlineStorage<$n, { $crate::core::full_shard_count($n, 512) }, 8>;
+
+        pub(crate) fn $ctor() -> $name {
+            $crate::core::InlineStorage::new()
+        }
+    };
+}

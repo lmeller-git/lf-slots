@@ -1,9 +1,7 @@
 use crossbeam_utils::CachePadded;
 
-#[cfg(feature = "alloc")]
-use crate::slot_alloc::StorageExt;
 use crate::{
-    slot_alloc::{RawStorage, SlotHandle, next_id},
+    slot_alloc::{RawStorage, SlotHandle, StorageData, StorageExt, next_id},
     sync::atomic::{AtomicU64, AtomicUsize, Ordering},
 };
 
@@ -11,12 +9,12 @@ use crate::{
 
 const WORD_BITS: usize = u64::BITS as usize;
 
-pub(crate) struct BitsetStorage<const WORDS: usize> {
+pub struct BitsetStorage<const WORDS: usize> {
     words: CachePadded<[AtomicU64; WORDS]>,
 }
 
 impl<const WORDS: usize> BitsetStorage<WORDS> {
-    pub(crate) const BITS: usize = WORDS * WORD_BITS;
+    pub const BITS: usize = WORDS * WORD_BITS;
 
     fn free_count(&self) -> usize {
         self.words
@@ -70,7 +68,9 @@ impl<const WORDS: usize> RawStorage for BitsetStorage<WORDS> {
         let prev = unsafe { self.words.get_unchecked(word_idx) }.fetch_or(mask, Ordering::AcqRel);
         prev & mask == 0
     }
+}
 
+impl<const WORDS: usize> StorageData for BitsetStorage<WORDS> {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -88,13 +88,13 @@ impl<const WORDS: usize> RawStorage for BitsetStorage<WORDS> {
     }
 }
 
-pub(crate) struct MaskedBitsetStorage<const WORDS: usize> {
+pub struct MaskedBitsetStorage<const WORDS: usize> {
     inner: BitsetStorage<WORDS>,
     usable: u32,
 }
 
 impl<const WORDS: usize> MaskedBitsetStorage<WORDS> {
-    pub(crate) fn new(usable: usize) -> Self {
+    pub fn new(usable: usize) -> Self {
         debug_assert!(usable <= BitsetStorage::<WORDS>::BITS);
         let inner = BitsetStorage::default();
         for bit in usable..BitsetStorage::<WORDS>::BITS {
@@ -125,7 +125,9 @@ impl<const WORDS: usize> RawStorage for MaskedBitsetStorage<WORDS> {
         // The index was returned by self.inner.pull_raw()
         unsafe { self.inner.put_raw(index) }
     }
+}
 
+impl<const WORDS: usize> StorageData for MaskedBitsetStorage<WORDS> {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -142,13 +144,14 @@ impl<const WORDS: usize> RawStorage for MaskedBitsetStorage<WORDS> {
         self.usable as usize
     }
 }
-pub(crate) struct ConcatStorage<A, B> {
+
+pub struct ConcatStorage<A, B> {
     a: A,
     b: B,
 }
 
 impl<A, B> ConcatStorage<A, B> {
-    pub(crate) fn new(a: A, b: B) -> Self {
+    pub fn new(a: A, b: B) -> Self {
         Self { a, b }
     }
 }
@@ -181,7 +184,9 @@ impl<A: RawStorage, B: RawStorage> RawStorage for ConcatStorage<A, B> {
             unsafe { self.b.put_raw(index - a_cap) }
         }
     }
+}
 
+impl<A: StorageData, B: StorageData> StorageData for ConcatStorage<A, B> {
     fn is_empty(&self) -> bool {
         self.a.is_empty() && self.b.is_empty()
     }
@@ -199,120 +204,69 @@ impl<A: RawStorage, B: RawStorage> RawStorage for ConcatStorage<A, B> {
     }
 }
 
-pub(crate) struct InlineStorage<T, const N: usize> {
-    arr: [T; N],
-    cursor: AtomicUsize,
+impl<A: StorageExt, B: StorageExt> StorageExt for ConcatStorage<A, B> {
+    fn pull(&self) -> Option<SlotHandle> {
+        if let Some(r) = self.a.pull() {
+            Some(r)
+        } else {
+            self.b.pull()
+        }
+    }
+
+    fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
+        if let Err(handle) = self.a.put(index) {
+            return self.b.put(handle);
+        }
+        Ok(())
+    }
+}
+
+pub(crate) trait Buffer {
+    type Slot;
+
+    fn capacity(&self) -> usize;
+    fn inner(&self) -> &[Self::Slot];
+}
+
+pub struct GenericStorage<B> {
+    buffer: B,
+    cursor: CachePadded<AtomicUsize>,
     id: u64,
 }
 
-impl<T: Default, const N: usize> InlineStorage<T, N> {
-    pub(crate) fn new() -> Self {
+impl<B> GenericStorage<B> {
+    pub fn new(buffer: B) -> Self {
         Self {
-            arr: core::array::from_fn(|_| T::default()),
-            cursor: AtomicUsize::new(0),
+            buffer,
+            cursor: AtomicUsize::new(0).into(),
             id: next_id(),
         }
     }
 }
 
-impl<T: Default, const N: usize> Default for InlineStorage<T, N> {
+impl<B: Default> Default for GenericStorage<B> {
     fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<T: RawStorage, const N: usize> RawStorage for InlineStorage<T, N> {
-    fn pull_raw(&self) -> Option<usize> {
-        if N == 0 {
-            return None;
-        }
-        let start = self.cursor.fetch_add(1, Ordering::Relaxed) % N;
-        for offset in 0..N {
-            let idx = (start + offset) % N;
-            let item = &self.arr[idx];
-            if let Some(inner_idx) = item.pull_raw() {
-                return Some(inner_idx + idx * item.capacity());
-            }
-        }
-        None
-    }
-
-    unsafe fn put_raw(&self, index: usize) -> bool {
-        if self.arr.is_empty() {
-            return false;
-        }
-        let inner_capacity = self.arr[0].capacity();
-        if inner_capacity == 0 {
-            return false;
-        }
-        let row = index / inner_capacity;
-        let col = index % inner_capacity;
-        self.arr
-            .get(row)
-            .map(|slot| unsafe { slot.put_raw(col) })
-            .unwrap_or(false)
-    }
-
-    fn is_empty(&self) -> bool {
-        self.arr.iter().all(|slot| slot.is_empty())
-    }
-
-    fn is_full(&self) -> bool {
-        self.arr.iter().all(|slot| slot.is_full())
-    }
-
-    fn len(&self) -> usize {
-        self.arr.iter().map(|slot| slot.len()).sum()
-    }
-
-    fn capacity(&self) -> usize {
-        self.arr.iter().map(|slot| slot.capacity()).sum()
-    }
-}
-
-impl<T: RawStorage, const N: usize> StorageExt for InlineStorage<T, N> {
-    fn pull(&self) -> Option<SlotHandle> {
-        self.pull_raw().map(|raw| SlotHandle::new(raw, self.id))
-    }
-
-    fn put(&self, index: SlotHandle) -> bool {
-        if index.id() != self.id {
-            return false;
-        }
-        unsafe { self.put_raw(index.as_usize()) }
-    }
-}
-
-#[cfg(feature = "alloc")]
-pub(crate) struct HeapStorage<T> {
-    #[allow(unused_qualifications)]
-    arr: alloc::boxed::Box<[T]>,
-    cursor: AtomicUsize,
-    id: u64,
-}
-
-#[cfg(feature = "alloc")]
-impl<T: Default> HeapStorage<T> {
-    pub(crate) fn new(size: usize) -> Self {
         Self {
-            arr: (0..size).map(|_| T::default()).collect(),
-            cursor: AtomicUsize::new(0),
+            buffer: B::default(),
+            cursor: AtomicUsize::new(0).into(),
             id: next_id(),
         }
     }
 }
 
-#[cfg(feature = "alloc")]
-impl<T: RawStorage> RawStorage for HeapStorage<T> {
+impl<B> RawStorage for GenericStorage<B>
+where
+    B: Buffer,
+    B::Slot: RawStorage,
+{
     fn pull_raw(&self) -> Option<usize> {
-        let n = self.arr.len();
-        if n == 0 {
+        if self.buffer.capacity() == 0 {
             return None;
         }
-        let start = self.cursor.fetch_add(1, Ordering::Relaxed) % n;
-        for offset in 0..n {
-            let idx = (start + offset) % n;
-            let item = &self.arr[idx];
+        let start = self.cursor.fetch_add(1, Ordering::Relaxed) % self.buffer.capacity();
+        for offset in 0..self.buffer.capacity() {
+            let idx = (start + offset) % self.buffer.capacity();
+            let item = &self.buffer.inner()[idx];
             if let Some(inner_idx) = item.pull_raw() {
                 return Some(inner_idx + idx * item.capacity());
             }
@@ -321,49 +275,249 @@ impl<T: RawStorage> RawStorage for HeapStorage<T> {
     }
 
     unsafe fn put_raw(&self, index: usize) -> bool {
-        if self.arr.is_empty() {
+        if self.buffer.capacity() == 0 {
             return false;
         }
-        let inner_capacity = self.arr[0].capacity();
+        let inner_capacity = self.buffer.inner()[0].capacity();
         if inner_capacity == 0 {
             return false;
         }
         let row = index / inner_capacity;
         let col = index % inner_capacity;
-        self.arr
+        self.buffer
+            .inner()
             .get(row)
             .map(|slot| unsafe { slot.put_raw(col) })
             .unwrap_or(false)
     }
+}
 
+impl<B> StorageData for GenericStorage<B>
+where
+    B: Buffer,
+    B::Slot: StorageData,
+{
     fn is_empty(&self) -> bool {
-        self.arr.iter().all(|slot| slot.is_empty())
+        self.buffer.inner().iter().all(|slot| slot.is_empty())
     }
 
     fn is_full(&self) -> bool {
-        self.arr.iter().all(|slot| slot.is_full())
+        self.buffer.inner().iter().all(|slot| slot.is_full())
     }
 
     fn len(&self) -> usize {
-        self.arr.iter().map(|slot| slot.len()).sum()
+        self.buffer.inner().iter().map(|slot| slot.len()).sum()
     }
 
     fn capacity(&self) -> usize {
-        self.arr.iter().map(|slot| slot.capacity()).sum()
+        self.buffer.inner().iter().map(|slot| slot.capacity()).sum()
     }
 }
 
-#[cfg(feature = "alloc")]
-impl<T: RawStorage> StorageExt for HeapStorage<T> {
+impl<B> StorageExt for GenericStorage<B>
+where
+    B: Buffer,
+    B::Slot: RawStorage,
+{
     fn pull(&self) -> Option<SlotHandle> {
         self.pull_raw().map(|raw| SlotHandle::new(raw, self.id))
     }
 
-    fn put(&self, index: SlotHandle) -> bool {
+    fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
         if index.id() != self.id {
-            return false;
+            return Err(index);
         }
-        unsafe { self.put_raw(index.as_usize()) }
+        // SAFETY:
+        // we just checked the id
+        if unsafe { self.put_raw(index.as_usize()) } {
+            Ok(())
+        } else {
+            Err(index)
+        }
+    }
+}
+
+pub struct InlineBuffer<T, const N: usize> {
+    buf: [T; N],
+}
+
+impl<T: Default, const N: usize> InlineBuffer<T, N> {
+    pub fn new() -> Self {
+        Self {
+            buf: core::array::from_fn(|_| T::default()),
+        }
+    }
+}
+
+impl<T> InlineBuffer<T, 1> {
+    pub fn with_storage(storage: T) -> Self {
+        Self { buf: [storage] }
+    }
+}
+
+impl<T, const N: usize> Buffer for InlineBuffer<T, N> {
+    type Slot = T;
+
+    fn capacity(&self) -> usize {
+        N
+    }
+
+    fn inner(&self) -> &[Self::Slot] {
+        self.buf.as_ref()
+    }
+}
+
+pub struct InlineStorage<const N: usize, const SHARDS: usize, const WORDS: usize> {
+    raw: ConcatStorage<
+        GenericStorage<InlineBuffer<BitsetStorage<WORDS>, SHARDS>>,
+        GenericStorage<InlineBuffer<MaskedBitsetStorage<WORDS>, 1>>,
+    >,
+}
+
+impl<const N: usize, const SHARDS: usize, const WORDS: usize> InlineStorage<N, SHARDS, WORDS> {
+    pub fn new() -> Self {
+        Self {
+            raw: ConcatStorage::new(
+                GenericStorage::new(InlineBuffer::new()),
+                GenericStorage::new(InlineBuffer::with_storage(MaskedBitsetStorage::new(
+                    tail_bits(N, WORDS * WORD_BITS),
+                ))),
+            ),
+        }
+    }
+}
+
+impl<const N: usize, const SHARDS: usize, const WORDS: usize> StorageData
+    for InlineStorage<N, SHARDS, WORDS>
+{
+    fn len(&self) -> usize {
+        self.raw.len()
+    }
+
+    fn capacity(&self) -> usize {
+        self.raw.capacity()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.raw.is_empty()
+    }
+
+    fn is_full(&self) -> bool {
+        self.raw.is_full()
+    }
+}
+
+impl<const N: usize, const SHARDS: usize, const WORDS: usize> RawStorage
+    for InlineStorage<N, SHARDS, WORDS>
+{
+    fn pull_raw(&self) -> Option<usize> {
+        self.raw.pull_raw()
+    }
+
+    unsafe fn put_raw(&self, index: usize) -> bool {
+        unsafe { self.raw.put_raw(index) }
+    }
+}
+
+impl<const N: usize, const SHARDS: usize, const WORDS: usize> StorageExt
+    for InlineStorage<N, SHARDS, WORDS>
+{
+    fn pull(&self) -> Option<SlotHandle> {
+        self.raw.pull()
+    }
+
+    fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
+        self.raw.put(index)
+    }
+}
+
+#[cfg(feature = "alloc")]
+pub struct HeapBuf<T> {
+    raw: Box<[T]>,
+}
+
+#[cfg(feature = "alloc")]
+impl<T: Default> HeapBuf<T> {
+    pub fn new(size: usize) -> Self {
+        Self {
+            raw: (0..size).map(|_| T::default()).collect(),
+        }
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<T> Buffer for HeapBuf<T> {
+    type Slot = T;
+
+    fn capacity(&self) -> usize {
+        self.raw.len()
+    }
+
+    fn inner(&self) -> &[Self::Slot] {
+        self.raw.as_ref()
+    }
+}
+
+#[cfg(feature = "alloc")]
+pub struct HeapStorage<const WORDS: usize> {
+    raw: ConcatStorage<
+        GenericStorage<HeapBuf<BitsetStorage<WORDS>>>,
+        GenericStorage<InlineBuffer<MaskedBitsetStorage<WORDS>, 1>>,
+    >,
+}
+
+#[cfg(feature = "alloc")]
+impl<const WORDS: usize> HeapStorage<WORDS> {
+    pub fn new(size: usize) -> Self {
+        Self {
+            raw: ConcatStorage::new(
+                GenericStorage::new(HeapBuf::new(full_shard_count(size, WORD_BITS * WORDS))),
+                GenericStorage::new(InlineBuffer::with_storage(MaskedBitsetStorage::new(
+                    tail_bits(size, WORD_BITS * WORDS),
+                ))),
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<const WORDS: usize> StorageData for HeapStorage<WORDS> {
+    fn len(&self) -> usize {
+        self.raw.len()
+    }
+
+    fn capacity(&self) -> usize {
+        self.raw.capacity()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.raw.is_empty()
+    }
+
+    fn is_full(&self) -> bool {
+        self.raw.is_full()
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<const WORDS: usize> RawStorage for HeapStorage<WORDS> {
+    fn pull_raw(&self) -> Option<usize> {
+        self.raw.pull_raw()
+    }
+
+    unsafe fn put_raw(&self, index: usize) -> bool {
+        unsafe { self.raw.put_raw(index) }
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<const WORDS: usize> StorageExt for HeapStorage<WORDS> {
+    fn pull(&self) -> Option<SlotHandle> {
+        self.raw.pull()
+    }
+
+    fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
+        self.raw.put(index)
     }
 }
 
@@ -373,21 +527,4 @@ pub const fn full_shard_count(n: usize, shard_bits: usize) -> usize {
 
 pub const fn tail_bits(n: usize, shard_bits: usize) -> usize {
     n % shard_bits
-}
-
-#[macro_export]
-macro_rules! define_index_store {
-    ($name:ident, $ctor:ident, $n:expr) => {
-        pub(crate) type $name = $crate::ConcatStorage<
-            $crate::InlineStorage<$crate::BitsetStorage<8>, { $crate::full_shard_count($n, 512) }>,
-            $crate::MaskedBitsetStorage<8>,
-        >;
-
-        pub(crate) fn $ctor() -> $name {
-            $crate::ConcatStorage::new(
-                ::core::default::Default::default(),
-                $crate::MaskedBitsetStorage::new($crate::tail_bits($n, 512)),
-            )
-        }
-    };
 }

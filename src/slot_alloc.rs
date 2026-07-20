@@ -1,21 +1,32 @@
+use core::fmt::Display;
+
 use crate::sync::atomic::{AtomicU64, Ordering};
 
-pub trait StorageExt {
-    fn pull(&self) -> Option<SlotHandle>;
-    fn put(&self, index: SlotHandle) -> bool;
-}
-
-pub trait RawStorage {
-    fn pull_raw(&self) -> Option<usize>;
-    unsafe fn put_raw(&self, index: usize) -> bool;
-    fn is_empty(&self) -> bool;
-    fn is_full(&self) -> bool;
+pub trait StorageData {
     fn len(&self) -> usize;
     fn capacity(&self) -> usize;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn is_full(&self) -> bool {
+        self.len() == self.capacity()
+    }
+}
+
+pub trait StorageExt: RawStorage {
+    fn pull(&self) -> Option<SlotHandle>;
+    fn put(&self, index: SlotHandle) -> Result<(), SlotHandle>;
+}
+
+pub trait RawStorage: StorageData {
+    fn pull_raw(&self) -> Option<usize>;
+    unsafe fn put_raw(&self, index: usize) -> bool;
 }
 
 pub(crate) fn next_id() -> u64 {
-    static ID: AtomicU64 = AtomicU64::new(0);
+    static ID: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
     ID.fetch_add(1, Ordering::Relaxed)
 }
 
@@ -39,5 +50,13 @@ impl SlotHandle {
 
     pub fn as_usize(&self) -> usize {
         self.slot
+    }
+}
+
+impl Display for SlotHandle {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SlotHandle")
+            .field("index", &self.slot)
+            .finish_non_exhaustive()
     }
 }
