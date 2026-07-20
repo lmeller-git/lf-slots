@@ -62,6 +62,11 @@ workspace = true
 name = "main_benchmarks"
 harness = false
 
+[profile.profiling]
+inherits = "release"
+debug = true
+lto = "thin"
+
 [workspace.lints.rust]
 unknown-lints = "allow"
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(loom)', 'cfg(shuttle)', 'cfg(echeneis)'] }
