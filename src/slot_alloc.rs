@@ -1,6 +1,6 @@
 use core::fmt::Display;
 
-use crate::sync::atomic::{AtomicU64, Ordering};
+use crate::sync::atomic::Ordering;
 
 pub trait StorageData {
     fn len(&self) -> usize;
@@ -22,6 +22,11 @@ pub trait StorageExt: RawStorage {
 
 pub trait RawStorage: StorageData {
     fn pull_raw(&self) -> Option<usize>;
+    /// # Safety
+    /// This function requires that `index` is in bounds of the underlying storage.
+    /// Further it requires that `index` is an index to a slot of this storage, which was not freed beforehand.
+    ///
+    /// `index` is an index returned by `pull_raw`
     unsafe fn put_raw(&self, index: usize) -> bool;
 }
 

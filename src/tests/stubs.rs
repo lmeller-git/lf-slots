@@ -58,7 +58,7 @@ where
     assert!(storage.is_full());
     assert_eq!(storage.len(), 10);
 
-    // SAFETY
+    // SAFETY:
     // We use only this pool here and the pool is empty and of capacity 10
     assert!(unsafe { storage.put_raw(5) });
     assert!(!storage.is_full());
@@ -68,7 +68,7 @@ where
     assert_eq!(storage.pull().map(|item| item.as_usize()), Some(5));
 
     for i in 0..10 {
-        // SAFETY
+        // SAFETY:
         // We use only this pool here and the pool is empty and of capacity 10
         assert!(unsafe { storage.put_raw(i) });
     }

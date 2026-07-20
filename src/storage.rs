@@ -179,8 +179,14 @@ impl<A: RawStorage, B: RawStorage> RawStorage for ConcatStorage<A, B> {
     unsafe fn put_raw(&self, index: usize) -> bool {
         let a_cap = self.a.capacity();
         if index < a_cap {
+            // SAFETY:
+            // The index was returned by self.inner.pull_raw()
+            // We just checked that it is within bounds of the allocation
             unsafe { self.a.put_raw(index) }
         } else {
+            // SAFETY:
+            // The index was returned by self.inner.pull_raw()
+            // Thus it is within bounds of the allocation
             unsafe { self.b.put_raw(index - a_cap) }
         }
     }
@@ -228,14 +234,14 @@ pub(crate) trait Buffer {
     fn inner(&self) -> &[Self::Slot];
 }
 
-pub struct GenericStorage<B> {
+pub(crate) struct GenericStorage<B> {
     buffer: B,
     cursor: CachePadded<AtomicUsize>,
     id: u64,
 }
 
 impl<B> GenericStorage<B> {
-    pub fn new(buffer: B) -> Self {
+    pub(crate) fn new(buffer: B) -> Self {
         Self {
             buffer,
             cursor: AtomicUsize::new(0).into(),
@@ -287,6 +293,8 @@ where
         self.buffer
             .inner()
             .get(row)
+            // SAFETY:
+            // The index was returned by self.pull_raw
             .map(|slot| unsafe { slot.put_raw(col) })
             .unwrap_or(false)
     }
@@ -337,12 +345,12 @@ where
     }
 }
 
-pub struct InlineBuffer<T, const N: usize> {
+pub(crate) struct InlineBuffer<T, const N: usize> {
     buf: [T; N],
 }
 
 impl<T: Default, const N: usize> InlineBuffer<T, N> {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             buf: core::array::from_fn(|_| T::default()),
         }
@@ -350,7 +358,7 @@ impl<T: Default, const N: usize> InlineBuffer<T, N> {
 }
 
 impl<T> InlineBuffer<T, 1> {
-    pub fn with_storage(storage: T) -> Self {
+    pub(crate) fn with_storage(storage: T) -> Self {
         Self { buf: [storage] }
     }
 }
@@ -387,6 +395,14 @@ impl<const N: usize, const SHARDS: usize, const WORDS: usize> InlineStorage<N, S
     }
 }
 
+impl<const N: usize, const SHARDS: usize, const WORDS: usize> Default
+    for InlineStorage<N, SHARDS, WORDS>
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const N: usize, const SHARDS: usize, const WORDS: usize> StorageData
     for InlineStorage<N, SHARDS, WORDS>
 {
@@ -415,6 +431,8 @@ impl<const N: usize, const SHARDS: usize, const WORDS: usize> RawStorage
     }
 
     unsafe fn put_raw(&self, index: usize) -> bool {
+        // SAFETY:
+        // index was returned by self.pull_raw
         unsafe { self.raw.put_raw(index) }
     }
 }
@@ -432,13 +450,14 @@ impl<const N: usize, const SHARDS: usize, const WORDS: usize> StorageExt
 }
 
 #[cfg(feature = "alloc")]
-pub struct HeapBuf<T> {
-    raw: Box<[T]>,
+pub(crate) struct HeapBuf<T> {
+    #[allow(unused_qualifications)]
+    raw: alloc::boxed::Box<[T]>,
 }
 
 #[cfg(feature = "alloc")]
 impl<T: Default> HeapBuf<T> {
-    pub fn new(size: usize) -> Self {
+    pub(crate) fn new(size: usize) -> Self {
         Self {
             raw: (0..size).map(|_| T::default()).collect(),
         }
@@ -506,6 +525,8 @@ impl<const WORDS: usize> RawStorage for HeapStorage<WORDS> {
     }
 
     unsafe fn put_raw(&self, index: usize) -> bool {
+        // SAFETY:
+        // index was returned by self.pull_raw
         unsafe { self.raw.put_raw(index) }
     }
 }
