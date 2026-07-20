@@ -13,13 +13,13 @@ mod a {
     const CAPACITY: usize = 2048;
     const TOTAL_OPS: usize = 120_000;
 
-    fn bench_spsc(c: &mut Criterion) {
+    pub(crate) fn bench_spsc(c: &mut Criterion) {
         let mut group = c.benchmark_group("SPSC Throughput");
         group.throughput(Throughput::Elements(TOTAL_OPS as u64));
 
         group.bench_function("InlineSlots", |b| {
             b.iter(|| {
-                let slots = Arc::new(HeapStorage::<8>::new(CAPACITY));
+                let slots = Arc::new(HeapStorage::new(CAPACITY));
                 let queue = Arc::new(ArrayQueue::new(CAPACITY));
 
                 let s_clone = slots.clone();
@@ -58,7 +58,7 @@ mod a {
         group.finish();
     }
 
-    fn bench_mpsc(c: &mut Criterion) {
+    pub(crate) fn bench_mpsc(c: &mut Criterion) {
         let mut group = c.benchmark_group("MPSC Throughput");
         group.throughput(Throughput::Elements(TOTAL_OPS as u64));
 
@@ -68,7 +68,7 @@ mod a {
                 &num_producers,
                 |b, &producers| {
                     b.iter(|| {
-                        let slots = Arc::new(HeapStorage::<8>::new(CAPACITY));
+                        let slots = Arc::new(HeapStorage::new(CAPACITY));
                         let queue = Arc::new(ArrayQueue::new(CAPACITY));
                         let ops_per_producer = TOTAL_OPS / producers;
 
@@ -115,7 +115,7 @@ mod a {
         group.finish();
     }
 
-    fn bench_mpmc(c: &mut Criterion) {
+    pub(crate) fn bench_mpmc(c: &mut Criterion) {
         let mut group = c.benchmark_group("MPMC Throughput");
         group.throughput(Throughput::Elements(TOTAL_OPS as u64));
 
@@ -126,7 +126,7 @@ mod a {
                 &thread_pairs,
                 |b, &pairs| {
                     b.iter(|| {
-                        let slots = Arc::new(HeapStorage::<8>::new(CAPACITY));
+                        let slots = Arc::new(HeapStorage::new(CAPACITY));
                         let queue = Arc::new(ArrayQueue::new(CAPACITY));
                         let ops_per_thread = TOTAL_OPS / pairs;
 

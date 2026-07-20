@@ -3,8 +3,6 @@ use crate::{
     tests::stubs::{linearizable, mpmc, mpsc, spsc},
 };
 
-define_inline_store!(Storage2, storage2, 2);
-
 define_inline_store!(Storage10, storage10, 10);
 
 #[test]

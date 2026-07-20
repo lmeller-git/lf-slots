@@ -37,7 +37,7 @@ pub mod core {
 macro_rules! define_inline_store {
     ($name:ident, $ctor:ident, $n:expr) => {
         pub(crate) type $name =
-            $crate::core::InlineStorage<$n, { $crate::core::full_shard_count($n, 512) }, 8>;
+            $crate::core::InlineStorage<$n, { $crate::core::full_shard_count($n, 512) }>;
 
         pub(crate) fn $ctor() -> $name {
             $crate::core::InlineStorage::new()

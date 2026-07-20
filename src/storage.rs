@@ -2,20 +2,33 @@ use crossbeam_utils::CachePadded;
 
 use crate::{
     slot_alloc::{RawStorage, SlotHandle, StorageData, StorageExt, next_id},
-    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
-// TODO 32 bit atomcis under cfg
+#[cfg(target_has_atomic = "64")]
+pub(crate) type Word = u64;
+#[cfg(target_has_atomic = "64")]
+pub(crate) type AtomicWord = crate::sync::atomic::AtomicU64;
 
-const WORD_BITS: usize = u64::BITS as usize;
+#[cfg(not(target_has_atomic = "64"))]
+pub(crate) type Word = u32;
+#[cfg(not(target_has_atomic = "64"))]
+pub(crate) type AtomicWord = crate::sync::atomic::AtomicU32;
 
-pub struct BitsetStorage<const WORDS: usize> {
-    words: CachePadded<[AtomicU64; WORDS]>,
+#[allow(unused_qualifications)]
+pub(crate) const WORD_BYTES: usize = core::mem::size_of::<Word>();
+pub(crate) const WORD_BITS: usize = Word::BITS as usize;
+
+#[allow(unused_qualifications)]
+pub(crate) const CACHE_LINE_BYTES: usize = core::mem::align_of::<CachePadded<()>>();
+pub(crate) const WORDS_PER_CACHE_LINE: usize = CACHE_LINE_BYTES / WORD_BYTES;
+pub(crate) const BITS_PER_CACHE_LINE: usize = WORDS_PER_CACHE_LINE * WORD_BITS;
+
+pub struct BitsetStorage {
+    words: CachePadded<[AtomicWord; WORDS_PER_CACHE_LINE]>,
 }
 
-impl<const WORDS: usize> BitsetStorage<WORDS> {
-    pub const BITS: usize = WORDS * WORD_BITS;
-
+impl BitsetStorage {
     fn free_count(&self) -> usize {
         self.words
             .iter()
@@ -24,15 +37,15 @@ impl<const WORDS: usize> BitsetStorage<WORDS> {
     }
 }
 
-impl<const WORDS: usize> Default for BitsetStorage<WORDS> {
+impl Default for BitsetStorage {
     fn default() -> Self {
         Self {
-            words: core::array::from_fn(|_| AtomicU64::new(u64::MAX)).into(),
+            words: core::array::from_fn(|_| AtomicWord::new(Word::MAX)).into(),
         }
     }
 }
 
-impl<const WORDS: usize> RawStorage for BitsetStorage<WORDS> {
+impl RawStorage for BitsetStorage {
     fn pull_raw(&self) -> Option<usize> {
         for (word_idx, word) in self.words.iter().enumerate() {
             let mut current = word.load(Ordering::Relaxed);
@@ -70,34 +83,34 @@ impl<const WORDS: usize> RawStorage for BitsetStorage<WORDS> {
     }
 }
 
-impl<const WORDS: usize> StorageData for BitsetStorage<WORDS> {
+impl StorageData for BitsetStorage {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     fn is_full(&self) -> bool {
-        self.len() == Self::BITS
+        self.len() == BITS_PER_CACHE_LINE
     }
 
     fn len(&self) -> usize {
-        Self::BITS - self.free_count()
+        BITS_PER_CACHE_LINE - self.free_count()
     }
 
     fn capacity(&self) -> usize {
-        Self::BITS
+        BITS_PER_CACHE_LINE
     }
 }
 
-pub struct MaskedBitsetStorage<const WORDS: usize> {
-    inner: BitsetStorage<WORDS>,
+pub struct MaskedBitsetStorage {
+    inner: BitsetStorage,
     usable: u32,
 }
 
-impl<const WORDS: usize> MaskedBitsetStorage<WORDS> {
+impl MaskedBitsetStorage {
     pub fn new(usable: usize) -> Self {
-        debug_assert!(usable <= BitsetStorage::<WORDS>::BITS);
+        debug_assert!(usable <= BITS_PER_CACHE_LINE);
         let inner = BitsetStorage::default();
-        for bit in usable..BitsetStorage::<WORDS>::BITS {
+        for bit in usable..BITS_PER_CACHE_LINE {
             let word_idx = bit / WORD_BITS;
             let b = bit % WORD_BITS;
             inner.words[word_idx].fetch_and(!(1u64 << b), Ordering::Relaxed);
@@ -109,7 +122,7 @@ impl<const WORDS: usize> MaskedBitsetStorage<WORDS> {
     }
 }
 
-impl<const WORDS: usize> RawStorage for MaskedBitsetStorage<WORDS> {
+impl RawStorage for MaskedBitsetStorage {
     fn pull_raw(&self) -> Option<usize> {
         self.inner.pull_raw()
     }
@@ -127,7 +140,7 @@ impl<const WORDS: usize> RawStorage for MaskedBitsetStorage<WORDS> {
     }
 }
 
-impl<const WORDS: usize> StorageData for MaskedBitsetStorage<WORDS> {
+impl StorageData for MaskedBitsetStorage {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -375,37 +388,33 @@ impl<T, const N: usize> Buffer for InlineBuffer<T, N> {
     }
 }
 
-pub struct InlineStorage<const N: usize, const SHARDS: usize, const WORDS: usize> {
+pub struct InlineStorage<const N: usize, const SHARDS: usize> {
     raw: ConcatStorage<
-        GenericStorage<InlineBuffer<BitsetStorage<WORDS>, SHARDS>>,
-        GenericStorage<InlineBuffer<MaskedBitsetStorage<WORDS>, 1>>,
+        GenericStorage<InlineBuffer<BitsetStorage, SHARDS>>,
+        GenericStorage<InlineBuffer<MaskedBitsetStorage, 1>>,
     >,
 }
 
-impl<const N: usize, const SHARDS: usize, const WORDS: usize> InlineStorage<N, SHARDS, WORDS> {
+impl<const N: usize, const SHARDS: usize> InlineStorage<N, SHARDS> {
     pub fn new() -> Self {
         Self {
             raw: ConcatStorage::new(
                 GenericStorage::new(InlineBuffer::new()),
                 GenericStorage::new(InlineBuffer::with_storage(MaskedBitsetStorage::new(
-                    tail_bits(N, WORDS * WORD_BITS),
+                    tail_bits(N, BITS_PER_CACHE_LINE),
                 ))),
             ),
         }
     }
 }
 
-impl<const N: usize, const SHARDS: usize, const WORDS: usize> Default
-    for InlineStorage<N, SHARDS, WORDS>
-{
+impl<const N: usize, const SHARDS: usize> Default for InlineStorage<N, SHARDS> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const N: usize, const SHARDS: usize, const WORDS: usize> StorageData
-    for InlineStorage<N, SHARDS, WORDS>
-{
+impl<const N: usize, const SHARDS: usize> StorageData for InlineStorage<N, SHARDS> {
     fn len(&self) -> usize {
         self.raw.len()
     }
@@ -423,9 +432,7 @@ impl<const N: usize, const SHARDS: usize, const WORDS: usize> StorageData
     }
 }
 
-impl<const N: usize, const SHARDS: usize, const WORDS: usize> RawStorage
-    for InlineStorage<N, SHARDS, WORDS>
-{
+impl<const N: usize, const SHARDS: usize> RawStorage for InlineStorage<N, SHARDS> {
     fn pull_raw(&self) -> Option<usize> {
         self.raw.pull_raw()
     }
@@ -437,9 +444,7 @@ impl<const N: usize, const SHARDS: usize, const WORDS: usize> RawStorage
     }
 }
 
-impl<const N: usize, const SHARDS: usize, const WORDS: usize> StorageExt
-    for InlineStorage<N, SHARDS, WORDS>
-{
+impl<const N: usize, const SHARDS: usize> StorageExt for InlineStorage<N, SHARDS> {
     fn pull(&self) -> Option<SlotHandle> {
         self.raw.pull()
     }
@@ -478,21 +483,21 @@ impl<T> Buffer for HeapBuf<T> {
 }
 
 #[cfg(feature = "alloc")]
-pub struct HeapStorage<const WORDS: usize> {
+pub struct HeapStorage {
     raw: ConcatStorage<
-        GenericStorage<HeapBuf<BitsetStorage<WORDS>>>,
-        GenericStorage<InlineBuffer<MaskedBitsetStorage<WORDS>, 1>>,
+        GenericStorage<HeapBuf<BitsetStorage>>,
+        GenericStorage<InlineBuffer<MaskedBitsetStorage, 1>>,
     >,
 }
 
 #[cfg(feature = "alloc")]
-impl<const WORDS: usize> HeapStorage<WORDS> {
+impl HeapStorage {
     pub fn new(size: usize) -> Self {
         Self {
             raw: ConcatStorage::new(
-                GenericStorage::new(HeapBuf::new(full_shard_count(size, WORD_BITS * WORDS))),
+                GenericStorage::new(HeapBuf::new(full_shard_count(size, BITS_PER_CACHE_LINE))),
                 GenericStorage::new(InlineBuffer::with_storage(MaskedBitsetStorage::new(
-                    tail_bits(size, WORD_BITS * WORDS),
+                    tail_bits(size, BITS_PER_CACHE_LINE),
                 ))),
             ),
         }
@@ -500,7 +505,7 @@ impl<const WORDS: usize> HeapStorage<WORDS> {
 }
 
 #[cfg(feature = "alloc")]
-impl<const WORDS: usize> StorageData for HeapStorage<WORDS> {
+impl StorageData for HeapStorage {
     fn len(&self) -> usize {
         self.raw.len()
     }
@@ -519,7 +524,7 @@ impl<const WORDS: usize> StorageData for HeapStorage<WORDS> {
 }
 
 #[cfg(feature = "alloc")]
-impl<const WORDS: usize> RawStorage for HeapStorage<WORDS> {
+impl RawStorage for HeapStorage {
     fn pull_raw(&self) -> Option<usize> {
         self.raw.pull_raw()
     }
@@ -532,7 +537,7 @@ impl<const WORDS: usize> RawStorage for HeapStorage<WORDS> {
 }
 
 #[cfg(feature = "alloc")]
-impl<const WORDS: usize> StorageExt for HeapStorage<WORDS> {
+impl StorageExt for HeapStorage {
     fn pull(&self) -> Option<SlotHandle> {
         self.raw.pull()
     }
