@@ -3,7 +3,7 @@
 use alloc::{collections::VecDeque, vec::Vec};
 
 use crate::{
-    slot_alloc::SlotStorage,
+    StorageExt,
     sync::{
         Arc,
         Condvar,
@@ -33,20 +33,21 @@ fn backoff() {
 
 pub(crate) fn smoke<S>(storage: S)
 where
-    S: SlotStorage,
+    S: StorageExt,
 {
     let i0 = storage.pull().unwrap();
     let i1 = storage.pull().unwrap();
     assert_ne!(i0, i1);
 
-    assert!(storage.put(i0));
+    let i0_v = i0.as_usize();
+    assert!(storage.put(i0).is_ok());
     let i2 = storage.pull().unwrap();
-    assert_eq!(i0, i2);
+    assert_eq!(i0_v, i2.as_usize());
 }
 
 pub(crate) fn smoke_long<S>(storage: S)
 where
-    S: SlotStorage,
+    S: StorageExt,
 {
     assert_eq!(storage.capacity(), 10);
 
@@ -57,26 +58,30 @@ where
     assert!(storage.is_full());
     assert_eq!(storage.len(), 10);
 
-    assert!(storage.put(5));
+    // SAFETY
+    // We use only this pool here and the pool is empty and of capacity 10
+    assert!(unsafe { storage.put_raw(5) });
     assert!(!storage.is_full());
 
     assert_eq!(storage.len(), 9);
 
-    assert_eq!(storage.pull(), Some(5));
+    assert_eq!(storage.pull().map(|item| item.as_usize()), Some(5));
 
     for i in 0..10 {
-        assert!(storage.put(i));
+        // SAFETY
+        // We use only this pool here and the pool is empty and of capacity 10
+        assert!(unsafe { storage.put_raw(i) });
     }
 
     assert!(storage.is_empty());
     assert_eq!(storage.len(), 0);
 
-    assert_eq!(storage.pull(), Some(0));
+    assert_eq!(storage.pull().map(|item| item.as_usize()), Some(0));
 }
 
 pub(crate) fn len_empty_full<S>(storage: S)
 where
-    S: SlotStorage,
+    S: StorageExt,
 {
     assert_eq!(storage.capacity(), 2);
     assert_eq!(storage.len(), 0);
@@ -93,23 +98,23 @@ where
     assert!(!storage.is_empty());
     assert!(storage.is_full());
 
-    assert!(storage.put(i0));
+    assert!(storage.put(i0).is_ok());
     assert_eq!(storage.len(), 1);
     assert!(!storage.is_empty());
     assert!(!storage.is_full());
 
-    assert!(storage.put(i1));
+    assert!(storage.put(i1).is_ok());
     assert_eq!(storage.len(), 0);
     assert!(storage.is_empty());
     assert!(!storage.is_full());
 }
 
-pub(crate) struct BlockingMpscChannel {
-    queue: Mutex<VecDeque<usize>>,
+pub(crate) struct BlockingMpscChannel<T> {
+    queue: Mutex<VecDeque<T>>,
     cond: Condvar,
 }
 
-impl BlockingMpscChannel {
+impl<T> BlockingMpscChannel<T> {
     pub(crate) fn new() -> Self {
         Self {
             queue: Mutex::new(VecDeque::new()),
@@ -117,13 +122,13 @@ impl BlockingMpscChannel {
         }
     }
 
-    pub(crate) fn send(&self, val: usize) {
+    pub(crate) fn send(&self, val: T) {
         let mut q = self.queue.lock().unwrap();
         q.push_back(val);
         self.cond.notify_one();
     }
 
-    pub(crate) fn recv(&self) -> usize {
+    pub(crate) fn recv(&self) -> T {
         let mut q = self.queue.lock().unwrap();
         while q.is_empty() {
             q = self.cond.wait(q).unwrap();
@@ -134,7 +139,7 @@ impl BlockingMpscChannel {
 
 pub(crate) fn spsc<S>(storage: S)
 where
-    S: SlotStorage + Send + Sync + 'static,
+    S: StorageExt + Send + Sync + 'static,
 {
     let storage = Arc::new(storage);
     let channel = Arc::new(BlockingMpscChannel::new());
@@ -157,7 +162,7 @@ where
     let consumer = thread::spawn(move || {
         for _ in 0..COUNT {
             let idx = channel.recv();
-            assert!(s_clone.put(idx));
+            assert!(s_clone.put(idx).is_ok());
         }
     });
 
@@ -168,7 +173,7 @@ where
 
 pub(crate) fn mpsc<S>(storage: S)
 where
-    S: SlotStorage + Send + 'static + Sync,
+    S: StorageExt + Send + 'static + Sync,
 {
     let storage = Arc::new(storage);
     let channel = Arc::new(BlockingMpscChannel::new());
@@ -195,7 +200,7 @@ where
     let consumer = thread::spawn(move || {
         for _ in 0..(THREADS * COUNT) {
             let idx = c_clone.recv();
-            assert!(s_clone.put(idx));
+            assert!(s_clone.put(idx).is_ok());
         }
     });
 
@@ -208,7 +213,7 @@ where
 
 pub(crate) fn mpmc<S>(storage: S)
 where
-    S: SlotStorage + Send + Sync + 'static,
+    S: StorageExt + Send + Sync + 'static,
 {
     let capacity = storage.capacity();
     let storage = Arc::new(storage);
@@ -233,7 +238,7 @@ where
                     backoff();
                 };
 
-                let old_owner = t_clone[idx].swap(owner_marker, Ordering::AcqRel);
+                let old_owner = t_clone[idx.as_usize()].swap(owner_marker, Ordering::AcqRel);
                 assert_eq!(
                     old_owner, 0,
                     "Race condition detected! Multiple threads acquired slot {}",
@@ -242,15 +247,15 @@ where
 
                 backoff();
 
-                let current_owner = t_clone[idx].load(Ordering::Acquire);
+                let current_owner = t_clone[idx.as_usize()].load(Ordering::Acquire);
                 assert_eq!(
                     current_owner, owner_marker,
                     "Slot {} was hijacked by another thread!",
                     idx
                 );
 
-                t_clone[idx].store(0, Ordering::Release);
-                assert!(s_clone.put(idx));
+                t_clone[idx.as_usize()].store(0, Ordering::Release);
+                assert!(s_clone.put(idx).is_ok());
             }
         }));
     }
@@ -263,7 +268,7 @@ where
 
 pub(crate) fn linearizable<S>(storage: S)
 where
-    S: SlotStorage + Send + Sync + 'static,
+    S: StorageExt + Send + Sync + 'static,
 {
     let storage = Arc::new(storage);
 
@@ -273,7 +278,7 @@ where
         workers.push(thread::spawn(move || {
             for _ in 0..COUNT {
                 let idx = s_clone.pull().unwrap();
-                assert!(s_clone.put(idx));
+                assert!(s_clone.put(idx).is_ok());
             }
         }));
     }

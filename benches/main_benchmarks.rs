@@ -2,31 +2,34 @@ use std::{sync::Arc, thread};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use crossbeam_queue::ArrayQueue;
-use lf_slots::{InlineSlots, SlotStorage};
+#[cfg(feature = "alloc")]
+use lf_slots::{HeapStorage, StorageExt};
 
 const CAPACITY: usize = 2048;
 const TOTAL_OPS: usize = 120_000;
 
+#[cfg(feature = "alloc")]
 fn bench_spsc(c: &mut Criterion) {
     let mut group = c.benchmark_group("SPSC Throughput");
     group.throughput(Throughput::Elements(TOTAL_OPS as u64));
 
     group.bench_function("InlineSlots", |b| {
         b.iter(|| {
-            let slots = Arc::new(InlineSlots::<CAPACITY>::new());
+            let slots = Arc::new(HeapStorage::<8>::new(CAPACITY));
             let queue = Arc::new(ArrayQueue::new(CAPACITY));
 
             let s_clone = slots.clone();
             let q_clone = queue.clone();
             let producer = thread::spawn(move || {
                 for _ in 0..TOTAL_OPS {
-                    let idx = loop {
+                    let mut idx = loop {
                         if let Some(idx) = s_clone.pull() {
                             break idx;
                         }
                         std::hint::spin_loop();
                     };
-                    while q_clone.push(idx).is_err() {
+                    while let Err(idx_) = q_clone.push(idx) {
+                        idx = idx_;
                         std::hint::spin_loop();
                     }
                 }
@@ -40,7 +43,7 @@ fn bench_spsc(c: &mut Criterion) {
                         }
                         std::hint::spin_loop();
                     };
-                    slots.put(idx);
+                    _ = slots.put(idx);
                 }
             });
 
@@ -51,6 +54,7 @@ fn bench_spsc(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(feature = "alloc")]
 fn bench_mpsc(c: &mut Criterion) {
     let mut group = c.benchmark_group("MPSC Throughput");
     group.throughput(Throughput::Elements(TOTAL_OPS as u64));
@@ -61,7 +65,7 @@ fn bench_mpsc(c: &mut Criterion) {
             &num_producers,
             |b, &producers| {
                 b.iter(|| {
-                    let slots = Arc::new(InlineSlots::<CAPACITY>::new());
+                    let slots = Arc::new(HeapStorage::<8>::new(CAPACITY));
                     let queue = Arc::new(ArrayQueue::new(CAPACITY));
                     let ops_per_producer = TOTAL_OPS / producers;
 
@@ -71,13 +75,14 @@ fn bench_mpsc(c: &mut Criterion) {
                         let q_clone = queue.clone();
                         producer_handles.push(thread::spawn(move || {
                             for _ in 0..ops_per_producer {
-                                let idx = loop {
+                                let mut idx = loop {
                                     if let Some(idx) = s_clone.pull() {
                                         break idx;
                                     }
                                     std::hint::spin_loop();
                                 };
-                                while q_clone.push(idx).is_err() {
+                                while let Err(idx_) = q_clone.push(idx) {
+                                    idx = idx_;
                                     std::hint::spin_loop();
                                 }
                             }
@@ -92,7 +97,7 @@ fn bench_mpsc(c: &mut Criterion) {
                                 }
                                 std::hint::spin_loop();
                             };
-                            slots.put(idx);
+                            _ = slots.put(idx);
                         }
                     });
 
@@ -107,6 +112,7 @@ fn bench_mpsc(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(feature = "alloc")]
 fn bench_mpmc(c: &mut Criterion) {
     let mut group = c.benchmark_group("MPMC Throughput");
     group.throughput(Throughput::Elements(TOTAL_OPS as u64));
@@ -118,7 +124,7 @@ fn bench_mpmc(c: &mut Criterion) {
             &thread_pairs,
             |b, &pairs| {
                 b.iter(|| {
-                    let slots = Arc::new(InlineSlots::<CAPACITY>::new());
+                    let slots = Arc::new(HeapStorage::<8>::new(CAPACITY));
                     let queue = Arc::new(ArrayQueue::new(CAPACITY));
                     let ops_per_thread = TOTAL_OPS / pairs;
 
@@ -129,13 +135,14 @@ fn bench_mpmc(c: &mut Criterion) {
                         let q_clone = queue.clone();
                         handles.push(thread::spawn(move || {
                             for _ in 0..ops_per_thread {
-                                let idx = loop {
+                                let mut idx = loop {
                                     if let Some(idx) = s_clone.pull() {
                                         break idx;
                                     }
                                     std::hint::spin_loop();
                                 };
-                                while q_clone.push(idx).is_err() {
+                                while let Err(idx_) = q_clone.push(idx) {
+                                    idx = idx_;
                                     std::hint::spin_loop();
                                 }
                             }
@@ -153,7 +160,7 @@ fn bench_mpmc(c: &mut Criterion) {
                                     }
                                     std::hint::spin_loop();
                                 };
-                                s_clone.put(idx);
+                                _ = s_clone.put(idx);
                             }
                         }));
                     }
@@ -168,5 +175,13 @@ fn bench_mpmc(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(feature = "alloc")]
 criterion_group!(benches, bench_spsc, bench_mpsc, bench_mpmc);
+#[cfg(feature = "alloc")]
 criterion_main!(benches);
+
+#[cfg(not(feature = "alloc"))]
+fn foo() {}
+
+#[cfg(not(feature = "alloc"))]
+criterion_main!(foo);

@@ -13,88 +13,34 @@ extern crate std;
 mod tests;
 
 mod slot_alloc;
+#[macro_use]
 mod storage;
 mod sync;
 
-pub use slot_alloc::SlotStorage;
+pub use slot_alloc::{RawStorage, SlotHandle, StorageData, StorageExt};
 
 #[cfg(feature = "alloc")]
-use crate::storage::HeapStorage;
-use crate::storage::{BooleanStorage, InlineStorage};
+pub use crate::storage::HeapStorage;
 
-pub struct InlineSlots<const N: usize>(InlineStorage<BooleanStorage, N>);
-
-impl<const N: usize> InlineSlots<N> {
-    pub fn new() -> Self {
-        Self(InlineStorage::new())
-    }
+pub mod core {
+    pub use crate::storage::{
+        BitsetStorage,
+        ConcatStorage,
+        InlineStorage,
+        MaskedBitsetStorage,
+        full_shard_count,
+        tail_bits,
+    };
 }
 
-impl<const N: usize> Default for InlineSlots<N> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+#[macro_export]
+macro_rules! define_inline_store {
+    ($name:ident, $ctor:ident, $n:expr) => {
+        pub(crate) type $name =
+            $crate::core::InlineStorage<$n, { $crate::core::full_shard_count($n, 512) }, 8>;
 
-#[cfg(feature = "alloc")]
-pub struct HeapSlots(HeapStorage<BooleanStorage>);
-
-#[cfg(feature = "alloc")]
-impl HeapSlots {
-    pub fn new(size: usize) -> Self {
-        Self(HeapStorage::new(size))
-    }
-}
-
-impl<const N: usize> SlotStorage for InlineSlots<N> {
-    fn pull(&self) -> Option<usize> {
-        self.0.pull()
-    }
-
-    fn put(&self, index: usize) -> bool {
-        self.0.put(index)
-    }
-
-    fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    fn is_full(&self) -> bool {
-        self.0.is_full()
-    }
-
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    fn capacity(&self) -> usize {
-        self.0.capacity()
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl SlotStorage for HeapSlots {
-    fn pull(&self) -> Option<usize> {
-        self.0.pull()
-    }
-
-    fn put(&self, index: usize) -> bool {
-        self.0.put(index)
-    }
-
-    fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    fn is_full(&self) -> bool {
-        self.0.is_full()
-    }
-
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    fn capacity(&self) -> usize {
-        self.0.capacity()
-    }
+        pub(crate) fn $ctor() -> $name {
+            $crate::core::InlineStorage::new()
+        }
+    };
 }

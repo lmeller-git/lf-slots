@@ -9,3 +9,5 @@ dhat-heap = ["dhat"]
 
 [dependencies]
 dhat = { version = "0.3.3", optional = true }
+lf-slots = { path = "../", features = ["std"] }
+crossbeam-queue = "0.3.13"
