@@ -52,7 +52,7 @@ impl RawStorage for BitsetStorage {
 
             while current != 0 {
                 let bit = current.trailing_zeros();
-                let mask = 1u64 << bit;
+                let mask = 1 << bit;
 
                 match word.compare_exchange_weak(
                     current,
@@ -75,7 +75,7 @@ impl RawStorage for BitsetStorage {
     unsafe fn put_raw(&self, index: usize) -> bool {
         let word_idx = index / WORD_BITS;
         let bit = index % WORD_BITS;
-        let mask = 1u64 << bit;
+        let mask = 1 << bit;
         // SAFETY:
         // the index is in range of totalbits
         let prev = unsafe { self.words.get_unchecked(word_idx) }.fetch_or(mask, Ordering::AcqRel);
@@ -113,7 +113,7 @@ impl MaskedBitsetStorage {
         for bit in usable..BITS_PER_CACHE_LINE {
             let word_idx = bit / WORD_BITS;
             let b = bit % WORD_BITS;
-            inner.words[word_idx].fetch_and(!(1u64 << b), Ordering::Relaxed);
+            inner.words[word_idx].fetch_and(!(1 << b), Ordering::Relaxed);
         }
         Self {
             inner,
