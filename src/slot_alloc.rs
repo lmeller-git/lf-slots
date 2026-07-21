@@ -1,6 +1,6 @@
 use core::fmt::Display;
 
-use crate::sync::atomic::Ordering;
+use crate::{storage::Word, sync::atomic::Ordering};
 
 /// Metadata of a Storage
 pub trait StorageData {
@@ -59,7 +59,7 @@ pub trait RawStorage: StorageData {
     unsafe fn put_raw(&self, index: usize) -> bool;
 }
 
-pub(crate) fn next_id() -> u64 {
+pub(crate) fn next_id() -> Word {
     #[cfg(target_has_atomic = "64")]
     static ID: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
     #[cfg(not(target_has_atomic = "64"))]
@@ -73,19 +73,19 @@ pub(crate) fn next_id() -> u64 {
 /// This handle cannot be cloned or copied, as it should be returned exactly once to the storage which produced it.
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct SlotHandle {
-    pool_id: u64,
+    pool_id: Word,
     slot: usize,
 }
 
 impl SlotHandle {
-    pub(crate) fn new(idx: usize, id: u64) -> Self {
+    pub(crate) fn new(idx: usize, id: Word) -> Self {
         Self {
             pool_id: id,
             slot: idx,
         }
     }
 
-    pub(crate) fn id(&self) -> u64 {
+    pub(crate) fn id(&self) -> Word {
         self.pool_id
     }
 

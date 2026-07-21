@@ -250,7 +250,7 @@ pub(crate) trait Buffer {
 pub(crate) struct GenericStorage<B> {
     buffer: B,
     cursor: CachePadded<AtomicUsize>,
-    id: u64,
+    id: Word,
 }
 
 impl<B> GenericStorage<B> {
