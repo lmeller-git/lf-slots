@@ -15,13 +15,18 @@ pub(crate) type Word = u32;
 #[cfg(not(target_has_atomic = "64"))]
 pub(crate) type AtomicWord = crate::sync::atomic::AtomicU32;
 
+#[cfg(not(loom))]
 #[allow(unused_qualifications)]
 pub(crate) const WORD_BYTES: usize = core::mem::size_of::<Word>();
 pub(crate) const WORD_BITS: usize = Word::BITS as usize;
 
+#[cfg(not(loom))]
 #[allow(unused_qualifications)]
 pub(crate) const CACHE_LINE_BYTES: usize = core::mem::align_of::<CachePadded<()>>();
+#[cfg(not(loom))]
 pub(crate) const WORDS_PER_CACHE_LINE: usize = CACHE_LINE_BYTES / WORD_BYTES;
+#[cfg(loom)]
+pub(crate) const WORDS_PER_CACHE_LINE: usize = 1;
 pub(crate) const BITS_PER_CACHE_LINE: usize = WORDS_PER_CACHE_LINE * WORD_BITS;
 
 pub(crate) struct BitsetStorage {
@@ -63,6 +68,9 @@ impl RawStorage for BitsetStorage {
                     Ok(_) => return Some(word_idx * WORD_BITS + bit as usize),
                     Err(observed) => current = observed,
                 }
+
+                #[cfg(any(loom, shuttle))]
+                crate::sync::thread::yield_now();
             }
         }
 

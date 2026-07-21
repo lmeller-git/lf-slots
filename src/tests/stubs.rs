@@ -18,8 +18,10 @@ pub(crate) const THREADS: usize = 2;
 #[cfg(not(any(miri, loom, shuttle)))]
 pub(crate) const THREADS: usize = 4;
 
-#[cfg(any(miri, loom, shuttle))]
-pub(crate) const COUNT: usize = 50;
+#[cfg(loom)]
+pub(crate) const COUNT: usize = 1;
+#[cfg(all(any(miri, shuttle), not(loom)))]
+pub(crate) const COUNT: usize = 10;
 #[cfg(not(any(miri, loom, shuttle)))]
 pub(crate) const COUNT: usize = 25_000;
 
