@@ -60,7 +60,11 @@ pub trait RawStorage: StorageData {
 }
 
 pub(crate) fn next_id() -> u64 {
+    #[cfg(target_has_atomic = "64")]
     static ID: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+    #[cfg(not(target_has_atomic = "64"))]
+    static ID: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
     ID.fetch_add(1, Ordering::Relaxed)
 }
 
