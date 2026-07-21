@@ -93,7 +93,7 @@ impl StorageData for BitsetStorage {
     }
 
     fn len(&self) -> usize {
-        BITS_PER_CACHE_LINE - self.free_count()
+        self.free_count()
     }
 
     fn capacity(&self) -> usize {
@@ -150,7 +150,7 @@ impl StorageData for MaskedBitsetStorage {
     }
 
     fn len(&self) -> usize {
-        self.usable as usize - self.inner.free_count()
+        self.inner.free_count()
     }
 
     fn capacity(&self) -> usize {

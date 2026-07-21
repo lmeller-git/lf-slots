@@ -51,19 +51,19 @@ where
 {
     assert_eq!(storage.capacity(), 10);
 
-    assert!(storage.is_empty());
+    assert!(storage.is_full());
     for _ in 0..10 {
         assert!(storage.pull().is_some());
     }
-    assert!(storage.is_full());
-    assert_eq!(storage.len(), 10);
+    assert!(storage.is_empty());
+    assert_eq!(storage.len(), 0);
 
     // SAFETY:
     // We use only this pool here and the pool is empty and of capacity 10
     assert!(unsafe { storage.put_raw(5) });
-    assert!(!storage.is_full());
+    assert!(!storage.is_empty());
 
-    assert_eq!(storage.len(), 9);
+    assert_eq!(storage.len(), 1);
 
     assert_eq!(storage.pull().map(|item| item.as_usize()), Some(5));
 
@@ -73,8 +73,8 @@ where
         assert!(unsafe { storage.put_raw(i) });
     }
 
-    assert!(storage.is_empty());
-    assert_eq!(storage.len(), 0);
+    assert!(storage.is_full());
+    assert_eq!(storage.len(), 10);
 
     assert_eq!(storage.pull().map(|item| item.as_usize()), Some(0));
 }
@@ -84,29 +84,29 @@ where
     S: StorageExt,
 {
     assert_eq!(storage.capacity(), 2);
-    assert_eq!(storage.len(), 0);
-    assert!(storage.is_empty());
-    assert!(!storage.is_full());
+    assert_eq!(storage.len(), 2);
+    assert!(storage.is_full());
+    assert!(!storage.is_empty());
 
     let i0 = storage.pull().unwrap();
     assert_eq!(storage.len(), 1);
-    assert!(!storage.is_empty());
     assert!(!storage.is_full());
+    assert!(!storage.is_empty());
 
     let i1 = storage.pull().unwrap();
-    assert_eq!(storage.len(), 2);
-    assert!(!storage.is_empty());
-    assert!(storage.is_full());
+    assert_eq!(storage.len(), 0);
+    assert!(!storage.is_full());
+    assert!(storage.is_empty());
 
     assert!(storage.put(i0).is_ok());
     assert_eq!(storage.len(), 1);
-    assert!(!storage.is_empty());
     assert!(!storage.is_full());
+    assert!(!storage.is_empty());
 
     assert!(storage.put(i1).is_ok());
-    assert_eq!(storage.len(), 0);
-    assert!(storage.is_empty());
-    assert!(!storage.is_full());
+    assert_eq!(storage.len(), 2);
+    assert!(storage.is_full());
+    assert!(!storage.is_empty());
 }
 
 pub(crate) struct BlockingMpscChannel<T> {
@@ -168,7 +168,7 @@ where
 
     producer.join().unwrap();
     consumer.join().unwrap();
-    assert!(storage.is_empty());
+    assert!(storage.is_full());
 }
 
 pub(crate) fn mpsc<S>(storage: S)
@@ -208,7 +208,7 @@ where
         p.join().unwrap();
     }
     consumer.join().unwrap();
-    assert!(storage.is_empty());
+    assert!(storage.is_full());
 }
 
 pub(crate) fn mpmc<S>(storage: S)
@@ -263,7 +263,7 @@ where
     for w in workers {
         w.join().unwrap();
     }
-    assert!(storage.is_empty());
+    assert!(storage.is_full());
 }
 
 pub(crate) fn linearizable<S>(storage: S)
