@@ -12,53 +12,53 @@ Non-blocking Lock-free index store.
 
 `lf-slots` provides datastructures for distributing and managing unique slot indices across multiple threads.
 
-All storage types in this repository are safe to use in a concurrent context, strictly lock-free  and will never block the calling thread.
+All storage types in this repository are safe to use in a concurrent context, strictly lock-free and will never block the calling thread.
 
 ### Storage Types
 
-- **InlineStorage**: statically sized stack allocated storage.
-- **HeapStorage**: statically sized heap allocated storage.
+- **InlineSlots**: statically sized stack allocated storage.
+- **HeapSlots**: statically sized heap allocated storage.
 
-Due to limitations with current const expr resolution, InlineStorage should be declared with `define_inline_store` in order to have the correct size and layout.
+Due to limitations with current const expr resolution, InlineSlots should be declared with `define_inline_slots` in order to have the correct size and layout.
 
 ### Usage
 
-`lf_slots::InlineStorage`:
+`lf_slots::InlineSlots`:
 
 ```rust
-use lf_slots::{define_inline_store, StorageExt, StorageData};
+use lf_slots::{define_inline_slots, SlotPool, SlotPoolMeta};
 
-define_inline_store!(Storage42, new_storage42, 42);
+define_inline_slots!(SlotPool42, 42);
 
-let storage = new_storage42();
+let pool = SlotPool42::new();
 
-assert_eq!(storage.capacity(), 42);
-assert_eq!(storage.len(), 42);
+assert_eq!(pool.capacity(), 42);
+assert_eq!(pool.len(), 42);
 
-let handle = storage.pull().unwrap();
-assert_eq!(storage.len(), 41);
+let handle = pool.pull().unwrap();
+assert_eq!(pool.len(), 41);
 _ = handle.as_usize();
-assert!(storage.put(handle).is_ok());
-assert!(storage.is_full());
+assert!(pool.put(handle).is_ok());
+assert!(pool.is_full());
 ```
 
-`lf_slots::HeapStorage`:
+`lf_slots::HeapSlots`:
 
 ```rust
 #[cfg(feature = "alloc")]
 fn run() {
- use lf_slots::{HeapStorage, StorageExt,  StorageData};
+ use lf_slots::{HeapSlots, SlotPool,  SlotPoolMeta};
 
- let storage = HeapStorage::new(42);
+ let pool = HeapSlots::new(42);
 
- assert_eq!(storage.capacity(), 42);
- assert_eq!(storage.len(), 42);
+ assert_eq!(pool.capacity(), 42);
+ assert_eq!(pool.len(), 42);
 
- let handle = storage.pull().unwrap();
- assert_eq!(storage.len(), 41);
+ let handle = pool.pull().unwrap();
+ assert_eq!(pool.len(), 41);
  _ = handle.as_usize();
- assert!(storage.put(handle).is_ok());
- assert!(storage.is_full());
+ assert!(pool.put(handle).is_ok());
+ assert!(pool.is_full());
 }
 
 #[cfg(feature = "alloc")]
@@ -70,7 +70,7 @@ run();
 All storage types use 64 bit or 32 bit atomics, depending on platform. Thus only platforms with 32-bit or 64-bit native atomics are supported.
 If the feature `atomic-fallback` is used, no native atomics are necessary.
 
-Layout of storage types is determined based on platform arhcitecture, to optimize cache line coherence.
+Layout of storage types is determined based on platform architecture to optimize cache line coherence.
 
 ### Feature Flags
 

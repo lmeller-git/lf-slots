@@ -1,7 +1,7 @@
 use crossbeam_utils::CachePadded;
 
 use crate::{
-    slot_alloc::{RawStorage, SlotHandle, StorageData, StorageExt, next_id},
+    slot_alloc::{RawSlotPool, SlotHandle, SlotPool, SlotPoolMeta, next_id},
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -50,7 +50,7 @@ impl Default for BitsetStorage {
     }
 }
 
-impl RawStorage for BitsetStorage {
+impl RawSlotPool for BitsetStorage {
     fn pull_raw(&self) -> Option<usize> {
         for (word_idx, word) in self.words.iter().enumerate() {
             let mut current = word.load(Ordering::Relaxed);
@@ -91,7 +91,7 @@ impl RawStorage for BitsetStorage {
     }
 }
 
-impl StorageData for BitsetStorage {
+impl SlotPoolMeta for BitsetStorage {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -130,7 +130,7 @@ impl MaskedBitsetStorage {
     }
 }
 
-impl RawStorage for MaskedBitsetStorage {
+impl RawSlotPool for MaskedBitsetStorage {
     fn pull_raw(&self) -> Option<usize> {
         self.inner.pull_raw()
     }
@@ -148,7 +148,7 @@ impl RawStorage for MaskedBitsetStorage {
     }
 }
 
-impl StorageData for MaskedBitsetStorage {
+impl SlotPoolMeta for MaskedBitsetStorage {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -186,7 +186,7 @@ impl<A: Default, B: Default> Default for ConcatStorage<A, B> {
     }
 }
 
-impl<A: RawStorage, B: RawStorage> RawStorage for ConcatStorage<A, B> {
+impl<A: RawSlotPool, B: RawSlotPool> RawSlotPool for ConcatStorage<A, B> {
     fn pull_raw(&self) -> Option<usize> {
         if let Some(idx) = self.a.pull_raw() {
             return Some(idx);
@@ -213,7 +213,7 @@ impl<A: RawStorage, B: RawStorage> RawStorage for ConcatStorage<A, B> {
     }
 }
 
-impl<A: StorageData, B: StorageData> StorageData for ConcatStorage<A, B> {
+impl<A: SlotPoolMeta, B: SlotPoolMeta> SlotPoolMeta for ConcatStorage<A, B> {
     fn is_empty(&self) -> bool {
         self.a.is_empty() && self.b.is_empty()
     }
@@ -231,7 +231,7 @@ impl<A: StorageData, B: StorageData> StorageData for ConcatStorage<A, B> {
     }
 }
 
-impl<A: StorageExt, B: StorageExt> StorageExt for ConcatStorage<A, B> {
+impl<A: SlotPool, B: SlotPool> SlotPool for ConcatStorage<A, B> {
     fn pull(&self) -> Option<SlotHandle> {
         if let Some(r) = self.a.pull() {
             Some(r)
@@ -281,10 +281,10 @@ impl<B: Default> Default for GenericStorage<B> {
     }
 }
 
-impl<B> RawStorage for GenericStorage<B>
+impl<B> RawSlotPool for GenericStorage<B>
 where
     B: Buffer,
-    B::Slot: RawStorage,
+    B::Slot: RawSlotPool,
 {
     fn pull_raw(&self) -> Option<usize> {
         if self.buffer.capacity() == 0 {
@@ -321,10 +321,10 @@ where
     }
 }
 
-impl<B> StorageData for GenericStorage<B>
+impl<B> SlotPoolMeta for GenericStorage<B>
 where
     B: Buffer,
-    B::Slot: StorageData,
+    B::Slot: SlotPoolMeta,
 {
     fn is_empty(&self) -> bool {
         self.buffer.inner().iter().all(|slot| slot.is_empty())
@@ -343,10 +343,10 @@ where
     }
 }
 
-impl<B> StorageExt for GenericStorage<B>
+impl<B> SlotPool for GenericStorage<B>
 where
     B: Buffer,
-    B::Slot: RawStorage,
+    B::Slot: RawSlotPool,
 {
     fn pull(&self) -> Option<SlotHandle> {
         self.pull_raw().map(|raw| SlotHandle::new(raw, self.id))
@@ -399,14 +399,14 @@ impl<T, const N: usize> Buffer for InlineBuffer<T, N> {
 /// A statically sized slot storage stored on the stack.
 ///
 /// The storage has a capacity of `N`, distributed over `SHARDS` shards of size _bits in a cacheline_
-pub struct InlineStorage<const N: usize, const SHARDS: usize> {
+pub struct InlineSlots<const N: usize, const SHARDS: usize> {
     raw: ConcatStorage<
         GenericStorage<InlineBuffer<BitsetStorage, SHARDS>>,
         GenericStorage<InlineBuffer<MaskedBitsetStorage, 1>>,
     >,
 }
 
-impl<const N: usize, const SHARDS: usize> InlineStorage<N, SHARDS> {
+impl<const N: usize, const SHARDS: usize> InlineSlots<N, SHARDS> {
     /// Constructs a new `InlineStorage`
     pub fn new() -> Self {
         Self {
@@ -420,13 +420,13 @@ impl<const N: usize, const SHARDS: usize> InlineStorage<N, SHARDS> {
     }
 }
 
-impl<const N: usize, const SHARDS: usize> Default for InlineStorage<N, SHARDS> {
+impl<const N: usize, const SHARDS: usize> Default for InlineSlots<N, SHARDS> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const N: usize, const SHARDS: usize> StorageData for InlineStorage<N, SHARDS> {
+impl<const N: usize, const SHARDS: usize> SlotPoolMeta for InlineSlots<N, SHARDS> {
     fn len(&self) -> usize {
         self.raw.len()
     }
@@ -444,7 +444,7 @@ impl<const N: usize, const SHARDS: usize> StorageData for InlineStorage<N, SHARD
     }
 }
 
-impl<const N: usize, const SHARDS: usize> RawStorage for InlineStorage<N, SHARDS> {
+impl<const N: usize, const SHARDS: usize> RawSlotPool for InlineSlots<N, SHARDS> {
     fn pull_raw(&self) -> Option<usize> {
         self.raw.pull_raw()
     }
@@ -456,7 +456,7 @@ impl<const N: usize, const SHARDS: usize> RawStorage for InlineStorage<N, SHARDS
     }
 }
 
-impl<const N: usize, const SHARDS: usize> StorageExt for InlineStorage<N, SHARDS> {
+impl<const N: usize, const SHARDS: usize> SlotPool for InlineSlots<N, SHARDS> {
     fn pull(&self) -> Option<SlotHandle> {
         self.raw.pull()
     }
@@ -496,7 +496,7 @@ impl<T> Buffer for HeapBuf<T> {
 
 /// A statically sized index storage stored on the heap.
 #[cfg(feature = "alloc")]
-pub struct HeapStorage {
+pub struct HeapSlots {
     raw: ConcatStorage<
         GenericStorage<HeapBuf<BitsetStorage>>,
         GenericStorage<InlineBuffer<MaskedBitsetStorage, 1>>,
@@ -504,7 +504,7 @@ pub struct HeapStorage {
 }
 
 #[cfg(feature = "alloc")]
-impl HeapStorage {
+impl HeapSlots {
     /// Constructs a new `HeapStorage` with capacity `size`
     pub fn new(size: usize) -> Self {
         Self {
@@ -519,7 +519,7 @@ impl HeapStorage {
 }
 
 #[cfg(feature = "alloc")]
-impl StorageData for HeapStorage {
+impl SlotPoolMeta for HeapSlots {
     fn len(&self) -> usize {
         self.raw.len()
     }
@@ -538,7 +538,7 @@ impl StorageData for HeapStorage {
 }
 
 #[cfg(feature = "alloc")]
-impl RawStorage for HeapStorage {
+impl RawSlotPool for HeapSlots {
     fn pull_raw(&self) -> Option<usize> {
         self.raw.pull_raw()
     }
@@ -551,7 +551,7 @@ impl RawStorage for HeapStorage {
 }
 
 #[cfg(feature = "alloc")]
-impl StorageExt for HeapStorage {
+impl SlotPool for HeapSlots {
     fn pull(&self) -> Option<SlotHandle> {
         self.raw.pull()
     }

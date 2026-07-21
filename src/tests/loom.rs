@@ -1,14 +1,14 @@
 use crate::{
-    define_inline_store,
+    define_inline_slots,
     tests::stubs::{linearizable, mpmc, mpsc, spsc},
 };
 
-define_inline_store!(Storage2, storage2, 2);
+define_inline_slots!(Storage2, 2);
 
 #[test]
 fn spsc_impl() {
     loom::model(|| {
-        let storage = storage2();
+        let storage = Storage2::new();
         spsc(storage);
     });
 }
@@ -16,7 +16,7 @@ fn spsc_impl() {
 #[test]
 fn mpsc_impl() {
     loom::model(|| {
-        let storage = storage2();
+        let storage = Storage2::new();
         mpsc(storage);
     });
 }
@@ -24,7 +24,7 @@ fn mpsc_impl() {
 #[test]
 fn mpmc_impl() {
     loom::model(|| {
-        let storage = storage2();
+        let storage = Storage2::new();
         mpmc(storage);
     });
 }
@@ -32,7 +32,7 @@ fn mpmc_impl() {
 #[test]
 fn linearizable_impl() {
     loom::model(|| {
-        let storage = storage2();
+        let storage = Storage2::new();
         linearizable(storage);
     });
 }

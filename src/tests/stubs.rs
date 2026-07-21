@@ -3,7 +3,7 @@
 use alloc::{collections::VecDeque, vec::Vec};
 
 use crate::{
-    StorageExt,
+    SlotPool,
     sync::{
         Arc,
         Condvar,
@@ -35,7 +35,7 @@ fn backoff() {
 
 pub(crate) fn smoke<S>(storage: S)
 where
-    S: StorageExt,
+    S: SlotPool,
 {
     let i0 = storage.pull().unwrap();
     let i1 = storage.pull().unwrap();
@@ -49,7 +49,7 @@ where
 
 pub(crate) fn smoke_long<S>(storage: S)
 where
-    S: StorageExt,
+    S: SlotPool,
 {
     assert_eq!(storage.capacity(), 10);
 
@@ -83,7 +83,7 @@ where
 
 pub(crate) fn len_empty_full<S>(storage: S)
 where
-    S: StorageExt,
+    S: SlotPool,
 {
     assert_eq!(storage.capacity(), 2);
     assert_eq!(storage.len(), 2);
@@ -141,7 +141,7 @@ impl<T> BlockingMpscChannel<T> {
 
 pub(crate) fn spsc<S>(storage: S)
 where
-    S: StorageExt + Send + Sync + 'static,
+    S: SlotPool + Send + Sync + 'static,
 {
     let storage = Arc::new(storage);
     let channel = Arc::new(BlockingMpscChannel::new());
@@ -175,7 +175,7 @@ where
 
 pub(crate) fn mpsc<S>(storage: S)
 where
-    S: StorageExt + Send + 'static + Sync,
+    S: SlotPool + Send + 'static + Sync,
 {
     let storage = Arc::new(storage);
     let channel = Arc::new(BlockingMpscChannel::new());
@@ -215,7 +215,7 @@ where
 
 pub(crate) fn mpmc<S>(storage: S)
 where
-    S: StorageExt + Send + Sync + 'static,
+    S: SlotPool + Send + Sync + 'static,
 {
     let capacity = storage.capacity();
     let storage = Arc::new(storage);
@@ -270,7 +270,7 @@ where
 
 pub(crate) fn linearizable<S>(storage: S)
 where
-    S: StorageExt + Send + Sync + 'static,
+    S: SlotPool + Send + Sync + 'static,
 {
     let storage = Arc::new(storage);
 

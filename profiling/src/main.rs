@@ -4,7 +4,7 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 use std::{env, sync::Arc, thread, time::Instant};
 
-use lf_slots::{HeapStorage, StorageExt};
+use lf_slots::{HeapSlots, SlotPool};
 
 const CAPACITY: usize = 2048;
 const TOTAL_OPS: usize = 20_000_000;
@@ -39,7 +39,7 @@ fn main() {
 }
 
 fn run_isolated(threads: usize) {
-    let slots = Arc::new(HeapStorage::<8>::new(CAPACITY));
+    let slots = Arc::new(HeapSlots::<8>::new(CAPACITY));
     let ops_per_thread = TOTAL_OPS / threads;
 
     let mut handles = Vec::with_capacity(threads);

@@ -3,7 +3,7 @@ use core::fmt::Display;
 use crate::{storage::Word, sync::atomic::Ordering};
 
 /// Metadata of a Storage
-pub trait StorageData {
+pub trait SlotPoolMeta {
     /// The length of a storage.
     ///
     /// In the context of this crate this is the number of free slots
@@ -31,7 +31,7 @@ pub trait StorageData {
 /// Safe interface for an index storage
 ///
 /// This is a safe wrapper of `RawStorage`.
-pub trait StorageExt: RawStorage {
+pub trait SlotPool: RawSlotPool {
     /// Pull a `SlotHandle` from the storage if it is not empty.
     fn pull(&self) -> Option<SlotHandle>;
     /// Put a `SlotHandle` back into the storage to free the associated slot.
@@ -44,7 +44,7 @@ pub trait StorageExt: RawStorage {
 ///
 /// Using this trait is unsafe.
 /// Underlying implementations may not ensure ABA safety, bound checking or double free safety.
-pub trait RawStorage: StorageData {
+pub trait RawSlotPool: SlotPoolMeta {
     /// Pulls a raw slot index from the storage if it is not empty.
     fn pull_raw(&self) -> Option<usize>;
     /// Puts back a raw slot index into the storage.

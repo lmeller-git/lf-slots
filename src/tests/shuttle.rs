@@ -1,15 +1,15 @@
 use crate::{
-    define_inline_store,
+    define_inline_slots,
     tests::stubs::{linearizable, mpmc, mpsc, spsc},
 };
 
-define_inline_store!(Storage10, storage10, 10);
+define_inline_slots!(Storage10, 10);
 
 #[test]
 fn spsc_impl() {
     shuttle::check_pct(
         || {
-            let storage = storage10();
+            let storage = Storage10::new();
             spsc(storage);
         },
         100,
@@ -21,7 +21,7 @@ fn spsc_impl() {
 fn mpsc_impl() {
     shuttle::check_pct(
         || {
-            let storage = storage10();
+            let storage = Storage10::new();
             mpsc(storage);
         },
         100,
@@ -33,7 +33,7 @@ fn mpsc_impl() {
 fn mpmc_impl() {
     shuttle::check_pct(
         || {
-            let storage = storage10();
+            let storage = Storage10::new();
             mpmc(storage);
         },
         100,
@@ -45,7 +45,7 @@ fn mpmc_impl() {
 fn linearizable_impl() {
     shuttle::check_pct(
         || {
-            let storage = storage10();
+            let storage = Storage10::new();
             linearizable(storage);
         },
         100,
