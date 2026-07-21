@@ -3,14 +3,14 @@
 
 #[cfg(all(not(loom), not(shuttle), not(echeneis)))]
 pub(crate) use core_::*;
-#[cfg(all(echeneis, test))]
+#[cfg(echeneis)]
 pub(crate) use echeneis_::*;
-#[cfg(all(loom, test))]
+#[cfg(loom)]
 pub(crate) use loom_::*;
-#[cfg(all(shuttle, test))]
+#[cfg(shuttle)]
 pub(crate) use shuttle_::*;
 
-#[cfg(all(shuttle, test))]
+#[cfg(shuttle)]
 mod shuttle_ {
     #[allow(unused_imports)]
     pub(crate) use shuttle::hint;
@@ -20,7 +20,7 @@ mod shuttle_ {
     };
 }
 
-#[cfg(all(loom, test))]
+#[cfg(loom)]
 mod loom_ {
     // no Weak in loom
     pub(crate) use std::sync::Weak;
@@ -45,7 +45,7 @@ mod core_ {
     pub(crate) use portable_atomic as atomic;
 }
 
-#[cfg(all(echeneis, test))]
+#[cfg(echeneis)]
 mod echeneis_ {
     #[cfg(feature = "alloc")]
     pub(crate) use alloc::sync::{Arc, Weak};
