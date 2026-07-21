@@ -5,7 +5,7 @@
 //! ## Storage Types
 //!
 //! - **InlineSlots**: statically sized stack allocated storage.
-//! - **HeapSlots**: statically sized heap allocated storage.
+//! - **Slots**: statically sized heap allocated storage.
 //!
 //! Due to limitations with current const expr resolution, InlineSlots should be declared with `define_inline_slots` in order to have the correct size and layout.
 //!
@@ -35,9 +35,9 @@
 //! ```rust
 //! #[cfg(feature = "alloc")]
 //! fn run() {
-//!  use lf_slots::{HeapSlots, SlotPool,  SlotPoolMeta};
+//!  use lf_slots::{Slots, SlotPool,  SlotPoolMeta};
 //!
-//!  let pool = HeapSlots::new(42);
+//!  let pool = Slots::new(42);
 //!
 //!  assert_eq!(pool.capacity(), 42);
 //!  assert_eq!(pool.len(), 42);
@@ -96,9 +96,9 @@ mod sync;
 
 pub use slot_alloc::{RawSlotPool, SlotHandle, SlotPool, SlotPoolMeta};
 
-#[cfg(feature = "alloc")]
-pub use crate::storage::HeapSlots;
 pub use crate::storage::InlineSlots;
+#[cfg(feature = "alloc")]
+pub use crate::storage::Slots;
 
 pub mod core {
     //! core funcitionality of `lf-slots` intended for more fine-grained control than top level exports.

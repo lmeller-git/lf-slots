@@ -496,7 +496,7 @@ impl<T> Buffer for HeapBuf<T> {
 
 /// A statically sized index storage stored on the heap.
 #[cfg(feature = "alloc")]
-pub struct HeapSlots {
+pub struct Slots {
     raw: ConcatStorage<
         GenericStorage<HeapBuf<BitsetStorage>>,
         GenericStorage<InlineBuffer<MaskedBitsetStorage, 1>>,
@@ -504,7 +504,7 @@ pub struct HeapSlots {
 }
 
 #[cfg(feature = "alloc")]
-impl HeapSlots {
+impl Slots {
     /// Constructs a new `HeapStorage` with capacity `size`
     pub fn new(size: usize) -> Self {
         Self {
@@ -519,7 +519,7 @@ impl HeapSlots {
 }
 
 #[cfg(feature = "alloc")]
-impl SlotPoolMeta for HeapSlots {
+impl SlotPoolMeta for Slots {
     fn len(&self) -> usize {
         self.raw.len()
     }
@@ -538,7 +538,7 @@ impl SlotPoolMeta for HeapSlots {
 }
 
 #[cfg(feature = "alloc")]
-impl RawSlotPool for HeapSlots {
+impl RawSlotPool for Slots {
     fn pull_raw(&self) -> Option<usize> {
         self.raw.pull_raw()
     }
@@ -551,7 +551,7 @@ impl RawSlotPool for HeapSlots {
 }
 
 #[cfg(feature = "alloc")]
-impl SlotPool for HeapSlots {
+impl SlotPool for Slots {
     fn pull(&self) -> Option<SlotHandle> {
         self.raw.pull()
     }

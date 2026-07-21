@@ -77,17 +77,17 @@ fn linearizable_impl() {
 #[cfg(feature = "alloc")]
 mod heap {
     use super::*;
-    use crate::HeapSlots;
+    use crate::Slots;
 
     #[test]
     fn smoke_impl() {
-        let storage = HeapSlots::new(2);
+        let storage = Slots::new(2);
         smoke(storage);
     }
 
     #[test]
     fn holds_n() {
-        let storage = HeapSlots::new(42);
+        let storage = Slots::new(42);
 
         while let Some(idx) = storage.pull_raw() {
             assert!(idx < 42);
@@ -106,37 +106,37 @@ mod heap {
 
     #[test]
     fn len_impl() {
-        let storage = HeapSlots::new(2);
+        let storage = Slots::new(2);
         len_empty_full(storage);
     }
 
     #[test]
     fn smoke_long_impl() {
-        let storage = HeapSlots::new(10);
+        let storage = Slots::new(10);
         smoke_long(storage);
     }
 
     #[test]
     fn spsc_impl() {
-        let storage = HeapSlots::new(1000);
+        let storage = Slots::new(1000);
         spsc(storage);
     }
 
     #[test]
     fn mpsc_impl() {
-        let storage = HeapSlots::new(1000);
+        let storage = Slots::new(1000);
         mpsc(storage);
     }
 
     #[test]
     fn mpmc_impl() {
-        let storage = HeapSlots::new(1000);
+        let storage = Slots::new(1000);
         mpmc(storage);
     }
 
     #[test]
     fn linearizable_impl() {
-        let storage = HeapSlots::new(10);
+        let storage = Slots::new(10);
         linearizable(storage);
     }
 }
