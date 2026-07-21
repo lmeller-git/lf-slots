@@ -24,7 +24,7 @@ pub(crate) const CACHE_LINE_BYTES: usize = core::mem::align_of::<CachePadded<()>
 pub(crate) const WORDS_PER_CACHE_LINE: usize = CACHE_LINE_BYTES / WORD_BYTES;
 pub(crate) const BITS_PER_CACHE_LINE: usize = WORDS_PER_CACHE_LINE * WORD_BITS;
 
-pub struct BitsetStorage {
+pub(crate) struct BitsetStorage {
     words: CachePadded<[AtomicWord; WORDS_PER_CACHE_LINE]>,
 }
 
@@ -101,13 +101,13 @@ impl StorageData for BitsetStorage {
     }
 }
 
-pub struct MaskedBitsetStorage {
+pub(crate) struct MaskedBitsetStorage {
     inner: BitsetStorage,
     usable: u32,
 }
 
 impl MaskedBitsetStorage {
-    pub fn new(usable: usize) -> Self {
+    pub(crate) fn new(usable: usize) -> Self {
         debug_assert!(usable <= BITS_PER_CACHE_LINE);
         let inner = BitsetStorage::default();
         for bit in usable..BITS_PER_CACHE_LINE {
@@ -158,13 +158,13 @@ impl StorageData for MaskedBitsetStorage {
     }
 }
 
-pub struct ConcatStorage<A, B> {
+pub(crate) struct ConcatStorage<A, B> {
     a: A,
     b: B,
 }
 
 impl<A, B> ConcatStorage<A, B> {
-    pub fn new(a: A, b: B) -> Self {
+    pub(crate) fn new(a: A, b: B) -> Self {
         Self { a, b }
     }
 }
@@ -388,6 +388,9 @@ impl<T, const N: usize> Buffer for InlineBuffer<T, N> {
     }
 }
 
+/// A statically sized slot storage stored on the stack.
+///
+/// The storage has a capacity of `N`, distributed over `SHARDS` shards of size _bits in a cacheline_
 pub struct InlineStorage<const N: usize, const SHARDS: usize> {
     raw: ConcatStorage<
         GenericStorage<InlineBuffer<BitsetStorage, SHARDS>>,
@@ -396,12 +399,13 @@ pub struct InlineStorage<const N: usize, const SHARDS: usize> {
 }
 
 impl<const N: usize, const SHARDS: usize> InlineStorage<N, SHARDS> {
+    /// Constructs a new `InlineStorage`
     pub fn new() -> Self {
         Self {
             raw: ConcatStorage::new(
                 GenericStorage::new(InlineBuffer::new()),
                 GenericStorage::new(InlineBuffer::with_storage(MaskedBitsetStorage::new(
-                    tail_bits(N, BITS_PER_CACHE_LINE),
+                    tail_bits(N),
                 ))),
             ),
         }
@@ -482,6 +486,7 @@ impl<T> Buffer for HeapBuf<T> {
     }
 }
 
+/// A statically sized index storage stored on the heap.
 #[cfg(feature = "alloc")]
 pub struct HeapStorage {
     raw: ConcatStorage<
@@ -492,12 +497,13 @@ pub struct HeapStorage {
 
 #[cfg(feature = "alloc")]
 impl HeapStorage {
+    /// Constructs a new `HeapStorage` with capacity `size`
     pub fn new(size: usize) -> Self {
         Self {
             raw: ConcatStorage::new(
-                GenericStorage::new(HeapBuf::new(full_shard_count(size, BITS_PER_CACHE_LINE))),
+                GenericStorage::new(HeapBuf::new(full_shard_count(size))),
                 GenericStorage::new(InlineBuffer::with_storage(MaskedBitsetStorage::new(
-                    tail_bits(size, BITS_PER_CACHE_LINE),
+                    tail_bits(size),
                 ))),
             ),
         }
@@ -547,10 +553,12 @@ impl StorageExt for HeapStorage {
     }
 }
 
-pub const fn full_shard_count(n: usize, shard_bits: usize) -> usize {
-    n / shard_bits
+/// Computes the numer of shards used to store `n` slots
+pub const fn full_shard_count(n: usize) -> usize {
+    n / BITS_PER_CACHE_LINE
 }
 
-pub const fn tail_bits(n: usize, shard_bits: usize) -> usize {
-    n % shard_bits
+/// Computes how many bits in the last shard should stay unused to sotre exactly `n` slots
+pub const fn tail_bits(n: usize) -> usize {
+    n % BITS_PER_CACHE_LINE
 }
