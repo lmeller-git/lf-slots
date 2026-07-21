@@ -1,13 +1,13 @@
-//! A lock-free datastructure for distributing indices to slots across multiple subscribers.
+//! `lf-slots` provides datastructures for distributing and managing unique slot indices across multiple threads.
 //!
-//! All storage types in this repository are safe to use in a concurrent context and will never block the calling thread.
+//! All storage types in this repository are safe to use in a concurrent context, strictly lock-free  and will never block the calling thread.
 //!
 //! ## Storage Types
 //!
 //! - **InlineStorage**: statically sized stack allocated storage.
 //! - **HeapStorage**: statically sized heap allocated storage.
 //!
-//! Due to limitations with current const expr resolution, InlineStorage should be declared with `define_inline_store` in order to have the correct size and layout.i
+//! Due to limitations with current const expr resolution, InlineStorage should be declared with `define_inline_store` in order to have the correct size and layout.
 //!
 //! ## Usage
 //!
@@ -55,15 +55,24 @@
 //!
 //! ## Platform Support
 //!
-//! TODO
+//! All storage types use 64 bit or 32 bit atomics, depending on platform. Thus only platforms with 32-bit or 64-bit native atomics are supported.
+//! If the feature `atomic-fallback` is used, no native atomics are necessary.
+//!
+//! Layout of storage types is determined based on platform arhcitecture, to optimize cache line coherence.
 //!
 //! ## Feature Flags
 //!
-//! TODO
+//! - `std`: Enables `std` and `alloc` support.
+//! - `alloc`: Enables `alloc` support, allowing usage of some dynamically allocated queues.
+//! - `atomic-fallback`: Uses `portable-atomic` `fallback` feature for atomics if necessary. It is discouraged to use this feature, as `fallback` internally uses locks.
+//! - `default`: []
 //!
 //! ## Testing
+//! Current testing is based on:
 //!
-//! TODO
+//! - **Miri** - to validate pointer arithmetic and catch UB.
+//! - **Loom and Shuttle** - to test for race conditions and blocking code.
+//! - **ASan** - to check for memory corruption.
 //!
 
 #![deny(missing_docs)]
