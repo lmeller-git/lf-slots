@@ -1,201 +1,12 @@
-use crossbeam_utils::CachePadded;
-
 use crate::{
-    core::CoherenceProvider,
-    slot_alloc::{
-        RawSlotPool,
-        SlotHandle,
-        SlotPool,
-        SlotPoolMeta,
-        coherence::AutoCoherenceProvider,
-        next_id,
-    },
-    sync::atomic::Ordering,
+    Batch,
+    SlotHandle,
+    SlotPool,
+    SlotPoolMeta,
+    bitshard::{BitsetStorage, MaskedBitsetStorage, ShardStorage},
+    cache_coherence::{AutoCoherenceProvider, CoherenceProvider},
+    core::{ID, RawBatch, RawSlotPool, tail_bits},
 };
-
-#[cfg(target_has_atomic = "64")]
-pub(crate) type Word = u64;
-#[cfg(target_has_atomic = "64")]
-pub(crate) type AtomicWord = crate::sync::atomic::AtomicU64;
-
-#[cfg(not(target_has_atomic = "64"))]
-pub(crate) type Word = u32;
-#[cfg(not(target_has_atomic = "64"))]
-pub(crate) type AtomicWord = crate::sync::atomic::AtomicU32;
-
-#[cfg(not(loom))]
-#[allow(unused_qualifications)]
-pub(crate) const WORD_BYTES: usize = core::mem::size_of::<Word>();
-pub(crate) const WORD_BITS: usize = Word::BITS as usize;
-
-#[cfg(not(loom))]
-#[allow(unused_qualifications)]
-pub(crate) const CACHE_LINE_BYTES: usize = core::mem::align_of::<CachePadded<()>>();
-#[cfg(not(loom))]
-pub(crate) const WORDS_PER_CACHE_LINE: usize = CACHE_LINE_BYTES / WORD_BYTES;
-#[cfg(loom)]
-pub(crate) const WORDS_PER_CACHE_LINE: usize = 1;
-pub(crate) const BITS_PER_CACHE_LINE: usize = WORDS_PER_CACHE_LINE * WORD_BITS;
-
-pub(crate) struct BitsetStorage {
-    words: CachePadded<[AtomicWord; WORDS_PER_CACHE_LINE]>,
-}
-
-impl BitsetStorage {
-    fn free_count(&self) -> usize {
-        self.words
-            .iter()
-            .map(|w| w.load(Ordering::Acquire).count_ones() as usize)
-            .sum()
-    }
-}
-
-impl Default for BitsetStorage {
-    fn default() -> Self {
-        Self {
-            words: core::array::from_fn(|_| AtomicWord::new(Word::MAX)).into(),
-        }
-    }
-}
-
-impl RawSlotPool for BitsetStorage {
-    fn pull_raw(&self) -> Option<usize> {
-        for (word_idx, word) in self.words.iter().enumerate() {
-            let mut current = word.load(Ordering::Relaxed);
-
-            while current != 0 {
-                let bit = current.trailing_zeros();
-                let mask = 1 << bit;
-
-                match word.compare_exchange_weak(
-                    current,
-                    current & !mask,
-                    Ordering::AcqRel,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => return Some(word_idx * WORD_BITS + bit as usize),
-                    Err(observed) => current = observed,
-                }
-
-                #[cfg(any(loom, shuttle))]
-                crate::sync::thread::yield_now();
-            }
-        }
-
-        None
-    }
-
-    /// # Safety
-    /// index is in bounds and is currently used.
-    /// In other words: index is an index retunred by `BitsetStorage::pull_raw` on THIS INSTANCE.
-    unsafe fn put_raw(&self, index: usize) -> bool {
-        let word_idx = index / WORD_BITS;
-        let bit = index % WORD_BITS;
-        let mask = 1 << bit;
-        // SAFETY:
-        // the index is in range of totalbits
-        let prev = unsafe { self.words.get_unchecked(word_idx) }.fetch_or(mask, Ordering::Release);
-        prev & mask == 0
-    }
-}
-
-impl SlotPoolMeta for BitsetStorage {
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    fn is_full(&self) -> bool {
-        self.len() == BITS_PER_CACHE_LINE
-    }
-
-    fn len(&self) -> usize {
-        self.free_count()
-    }
-
-    fn capacity(&self) -> usize {
-        BITS_PER_CACHE_LINE
-    }
-}
-
-pub(crate) struct MaskedBitsetStorage {
-    inner: BitsetStorage,
-    usable: u32,
-}
-
-impl MaskedBitsetStorage {
-    pub(crate) fn new(usable: usize) -> Self {
-        debug_assert!(usable <= BITS_PER_CACHE_LINE);
-        let inner = BitsetStorage::default();
-        for bit in usable..BITS_PER_CACHE_LINE {
-            let word_idx = bit / WORD_BITS;
-            let b = bit % WORD_BITS;
-            inner.words[word_idx].fetch_and(!(1 << b), Ordering::Relaxed);
-        }
-        Self {
-            inner,
-            usable: usable as u32,
-        }
-    }
-}
-
-impl RawSlotPool for MaskedBitsetStorage {
-    fn pull_raw(&self) -> Option<usize> {
-        self.inner.pull_raw()
-    }
-
-    /// # Safety
-    /// index is in bounds and is currently used.
-    /// In other words: index is an index retunred by `MaskedBitsetStorage::pull_raw` on THIS INSTANCE.
-    unsafe fn put_raw(&self, index: usize) -> bool {
-        if index >= self.usable as usize {
-            return false;
-        }
-        // SAFETY:
-        // The index was returned by self.inner.pull_raw()
-        unsafe { self.inner.put_raw(index) }
-    }
-}
-
-impl SlotPoolMeta for MaskedBitsetStorage {
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    fn is_full(&self) -> bool {
-        self.len() == self.usable as usize
-    }
-
-    fn len(&self) -> usize {
-        self.inner.free_count()
-    }
-
-    fn capacity(&self) -> usize {
-        self.usable as usize
-    }
-}
-
-pub(crate) trait ShardStorage {
-    const SHARD_BITS: usize;
-    const SHARD_SHIFT: u32;
-    const SHARD_MASK: usize;
-}
-
-const _: () = assert!(
-    BITS_PER_CACHE_LINE.is_power_of_two(),
-    "BITS_PER_CACHE_LINE must be a power of two for bitwise math to work!"
-);
-
-impl ShardStorage for BitsetStorage {
-    const SHARD_BITS: usize = BITS_PER_CACHE_LINE;
-    const SHARD_MASK: usize = BITS_PER_CACHE_LINE - 1;
-    const SHARD_SHIFT: u32 = BITS_PER_CACHE_LINE.ilog2();
-}
-
-impl ShardStorage for MaskedBitsetStorage {
-    const SHARD_BITS: usize = BITS_PER_CACHE_LINE;
-    const SHARD_MASK: usize = BITS_PER_CACHE_LINE - 1;
-    const SHARD_SHIFT: u32 = BITS_PER_CACHE_LINE.ilog2();
-}
 
 pub(crate) struct ConcatStorage<A, B> {
     a: A,
@@ -241,6 +52,25 @@ impl<A: RawSlotPool, B: RawSlotPool> RawSlotPool for ConcatStorage<A, B> {
             unsafe { self.b.put_raw(index - a_cap) }
         }
     }
+
+    fn pull_raw_batch(&self) -> Option<RawBatch> {
+        self.a.pull_raw_batch().or_else(|| {
+            self.b.pull_raw_batch().map(|mut batch| {
+                batch.starting_idx += self.a.capacity();
+                batch
+            })
+        })
+    }
+
+    unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
+        let a_cap = self.a.capacity();
+
+        if batch.starting_idx < a_cap {
+            unsafe { self.a.put_raw_batch(batch) }
+        } else {
+            unsafe { self.b.put_raw_batch(batch) }
+        }
+    }
 }
 
 impl<A: SlotPoolMeta, B: SlotPoolMeta> SlotPoolMeta for ConcatStorage<A, B> {
@@ -272,6 +102,17 @@ impl<A: SlotPool, B: SlotPool> SlotPool for ConcatStorage<A, B> {
         }
         Ok(())
     }
+
+    fn pull_batch(&self) -> Option<Batch> {
+        self.a.pull_batch().or_else(|| self.b.pull_batch())
+    }
+
+    fn put_batch(&self, batch: Batch) -> Result<(), Batch> {
+        if let Err(batch) = self.a.put_batch(batch) {
+            return self.b.put_batch(batch);
+        }
+        Ok(())
+    }
 }
 
 pub(crate) trait Buffer {
@@ -283,7 +124,7 @@ pub(crate) trait Buffer {
 
 pub(crate) struct GenericStorage<B, C> {
     buffer: B,
-    id: Word,
+    id: ID,
     coherence_hint: C,
 }
 
@@ -291,7 +132,7 @@ impl<B, C: Default> GenericStorage<B, C> {
     pub(crate) fn new(buffer: B) -> Self {
         Self {
             buffer,
-            id: next_id(),
+            id: ID::next(),
             coherence_hint: C::default(),
         }
     }
@@ -301,7 +142,7 @@ impl<B: Default, C: Default> Default for GenericStorage<B, C> {
     fn default() -> Self {
         Self {
             buffer: B::default(),
-            id: next_id(),
+            id: ID::next(),
             coherence_hint: C::default(),
         }
     }
@@ -370,6 +211,63 @@ where
         // given that index is valid
         unsafe { slot.put_raw(col) }
     }
+
+    fn pull_raw_batch(&self) -> Option<RawBatch> {
+        let inner = self.buffer.inner();
+        let cap = self.buffer.capacity();
+        // TODO: move to constructor
+        if unlikely(cap == 0) {
+            return None;
+        }
+
+        let mut start = self.coherence_hint.current_hint() % cap;
+        self.coherence_hint.advance_hint();
+
+        let mut base_offset = start << B::Slot::SHARD_SHIFT;
+
+        for _ in 0..cap {
+            // SAFETY:
+            // we ensure that 0 <= start < SHARD SIZE and SHARD_SIZE > 0
+            let item = unsafe { inner.get_unchecked(start) };
+            if let Some(mut inner_batch) = item.pull_raw_batch() {
+                inner_batch.starting_idx += base_offset;
+                return Some(inner_batch);
+            }
+
+            start += 1;
+            base_offset += B::Slot::SHARD_BITS;
+            if start == cap {
+                start = 0;
+                base_offset = 0;
+            }
+        }
+
+        None
+    }
+
+    unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
+        let inner = self.buffer.inner();
+        // TODO: move to constructor
+        if unlikely(self.buffer.capacity() == 0) {
+            return false;
+        }
+
+        let row = batch.starting_idx >> B::Slot::SHARD_SHIFT;
+        let col = batch.starting_idx & B::Slot::SHARD_MASK;
+
+        // SAFETY:
+        // index is a valid index as returned by `pull_raw`
+        let slot = unsafe { inner.get_unchecked(row) };
+        // SAFETY:
+        // we ensure that 0 <= col < SHARD SIZE and SHARD_SIZE > 0,
+        // given that index is valid
+        unsafe {
+            slot.put_raw_batch(RawBatch {
+                starting_idx: col,
+                mask: batch.mask,
+            })
+        }
+    }
 }
 
 impl<B, C> SlotPoolMeta for GenericStorage<B, C>
@@ -401,11 +299,12 @@ where
     C: CoherenceProvider,
 {
     fn pull(&self) -> Option<SlotHandle> {
-        self.pull_raw().map(|raw| SlotHandle::new(raw, self.id))
+        self.pull_raw()
+            .map(|raw| SlotHandle::new(raw, self.id.clone()))
     }
 
     fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
-        if index.id() != self.id {
+        if *index.id() != self.id {
             return Err(index);
         }
         // SAFETY:
@@ -414,6 +313,25 @@ where
             Ok(())
         } else {
             Err(index)
+        }
+    }
+
+    fn pull_batch(&self) -> Option<Batch> {
+        self.pull_raw_batch().map(|raw| Batch {
+            raw,
+            id: self.id.clone(),
+        })
+    }
+
+    fn put_batch(&self, batch: Batch) -> Result<(), Batch> {
+        if batch.id != self.id {
+            return Err(batch);
+        }
+
+        if unsafe { self.put_raw_batch(batch.raw) } {
+            Ok(())
+        } else {
+            Err(batch)
         }
     }
 }
@@ -515,6 +433,14 @@ impl<const N: usize, const SHARDS: usize, C: CoherenceProvider> RawSlotPool
         // index was returned by self.pull_raw
         unsafe { self.raw.put_raw(index) }
     }
+
+    fn pull_raw_batch(&self) -> Option<RawBatch> {
+        self.raw.pull_raw_batch()
+    }
+
+    unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
+        unsafe { self.raw.put_raw_batch(batch) }
+    }
 }
 
 impl<const N: usize, const SHARDS: usize, C: CoherenceProvider> SlotPool
@@ -526,6 +452,14 @@ impl<const N: usize, const SHARDS: usize, C: CoherenceProvider> SlotPool
 
     fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
         self.raw.put(index)
+    }
+
+    fn pull_batch(&self) -> Option<Batch> {
+        self.raw.pull_batch()
+    }
+
+    fn put_batch(&self, batch: Batch) -> Result<(), Batch> {
+        self.raw.put_batch(batch)
     }
 }
 
@@ -575,6 +509,8 @@ impl Slots<AutoCoherenceProvider> {
 
     /// COnstructs a new `Slots` instance with specified coherence provider.
     pub fn with_coherence_provider<C: CoherenceProvider + Default>(size: usize) -> Slots<C> {
+        use crate::core::full_shard_count;
+
         Slots {
             raw: ConcatStorage::new(
                 GenericStorage::new(HeapBuf::new(full_shard_count(size))),
@@ -616,6 +552,14 @@ impl<C: CoherenceProvider> RawSlotPool for Slots<C> {
         // index was returned by self.pull_raw
         unsafe { self.raw.put_raw(index) }
     }
+
+    fn pull_raw_batch(&self) -> Option<RawBatch> {
+        self.raw.pull_raw_batch()
+    }
+
+    unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
+        unsafe { self.raw.put_raw_batch(batch) }
+    }
 }
 
 #[cfg(feature = "alloc")]
@@ -627,14 +571,12 @@ impl<C: CoherenceProvider> SlotPool for Slots<C> {
     fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
         self.raw.put(index)
     }
-}
 
-/// Computes the numer of shards used to store `n` slots
-pub const fn full_shard_count(n: usize) -> usize {
-    n / BITS_PER_CACHE_LINE
-}
+    fn pull_batch(&self) -> Option<Batch> {
+        self.raw.pull_batch()
+    }
 
-/// Computes how many bits in the last shard should stay unused to sotre exactly `n` slots
-pub const fn tail_bits(n: usize) -> usize {
-    n % BITS_PER_CACHE_LINE
+    fn put_batch(&self, batch: Batch) -> Result<(), Batch> {
+        self.raw.put_batch(batch)
+    }
 }

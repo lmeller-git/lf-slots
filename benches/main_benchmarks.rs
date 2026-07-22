@@ -8,7 +8,7 @@ mod a {
 
     use criterion::{BenchmarkId, Criterion, Throughput};
     use crossbeam_queue::ArrayQueue;
-    use lf_slots::{RawSlotPool, SlotPool, Slots, core::CoherenceProvider};
+    use lf_slots::{SlotPool, Slots, cache_coherence::CoherenceProvider, core::RawSlotPool};
 
     const CAPACITY: usize = 4096;
     const BATCH_SIZE: usize = 32;

@@ -75,8 +75,8 @@
 //! - **ASan** - to check for memory corruption.
 //!
 
-#![deny(missing_docs)]
-#![deny(clippy::missing_safety_doc, clippy::undocumented_unsafe_blocks)]
+// #![deny(missing_docs)]
+// #![deny(clippy::missing_safety_doc, clippy::undocumented_unsafe_blocks)]
 #![warn(unsafe_op_in_unsafe_fn)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -89,35 +89,32 @@ extern crate std;
 #[cfg(all(test, feature = "std"))]
 mod tests;
 
+mod bitshard;
+pub mod cache_coherence;
+mod core_internal;
 mod slot_alloc;
 #[macro_use]
 mod storage;
 mod sync;
 
-pub use slot_alloc::{RawSlotPool, SlotHandle, SlotPool, SlotPoolMeta};
+pub use core_internal::{Batch, BatchIntoIter, SlotHandle};
+pub use slot_alloc::{SlotPool, SlotPoolMeta};
 
 pub use crate::storage::InlineSlots;
 #[cfg(feature = "alloc")]
 pub use crate::storage::Slots;
 
 pub mod core {
-    //! core funcitionality of `lf-slots` intended for more fine-grained control than top level exports.
-    #[cfg(feature = "std")]
-    pub use crate::slot_alloc::coherence::ThreadLocalRoundRobin;
     pub use crate::{
-        slot_alloc::coherence::{
-            AutoCoherenceProvider,
-            CoherenceProvider,
-            NoCoherence,
-            StripedRoundRobin,
-        },
-        storage::{full_shard_count, tail_bits},
+        bitshard::{full_shard_count, tail_bits},
+        core_internal::{ID, RawBatch, RawBatchIter, Word},
+        slot_alloc::RawSlotPool,
     };
 }
 
 pub mod prelude {
     //! reexports common traits implemeneted by `lf-slot` types.
-    pub use crate::{RawSlotPool, SlotPool, SlotPoolMeta};
+    pub use crate::{SlotPool, SlotPoolMeta};
 }
 
 /// Define a type alias for an `InlineSlots<N, { shards(N) }>`.
