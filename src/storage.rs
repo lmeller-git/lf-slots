@@ -1,8 +1,16 @@
 use crossbeam_utils::CachePadded;
 
 use crate::{
-    slot_alloc::{RawSlotPool, SlotHandle, SlotPool, SlotPoolMeta, next_id},
-    sync::atomic::{AtomicUsize, Ordering},
+    core::CoherenceProvider,
+    slot_alloc::{
+        RawSlotPool,
+        SlotHandle,
+        SlotPool,
+        SlotPoolMeta,
+        coherence::AutoCoherenceProvider,
+        next_id,
+    },
+    sync::atomic::Ordering,
 };
 
 #[cfg(target_has_atomic = "64")]
@@ -86,7 +94,7 @@ impl RawSlotPool for BitsetStorage {
         let mask = 1 << bit;
         // SAFETY:
         // the index is in range of totalbits
-        let prev = unsafe { self.words.get_unchecked(word_idx) }.fetch_or(mask, Ordering::AcqRel);
+        let prev = unsafe { self.words.get_unchecked(word_idx) }.fetch_or(mask, Ordering::Release);
         prev & mask == 0
     }
 }
@@ -166,6 +174,29 @@ impl SlotPoolMeta for MaskedBitsetStorage {
     }
 }
 
+pub(crate) trait ShardStorage {
+    const SHARD_BITS: usize;
+    const SHARD_SHIFT: u32;
+    const SHARD_MASK: usize;
+}
+
+const _: () = assert!(
+    BITS_PER_CACHE_LINE.is_power_of_two(),
+    "BITS_PER_CACHE_LINE must be a power of two for bitwise math to work!"
+);
+
+impl ShardStorage for BitsetStorage {
+    const SHARD_BITS: usize = BITS_PER_CACHE_LINE;
+    const SHARD_MASK: usize = BITS_PER_CACHE_LINE - 1;
+    const SHARD_SHIFT: u32 = BITS_PER_CACHE_LINE.ilog2();
+}
+
+impl ShardStorage for MaskedBitsetStorage {
+    const SHARD_BITS: usize = BITS_PER_CACHE_LINE;
+    const SHARD_MASK: usize = BITS_PER_CACHE_LINE - 1;
+    const SHARD_SHIFT: u32 = BITS_PER_CACHE_LINE.ilog2();
+}
+
 pub(crate) struct ConcatStorage<A, B> {
     a: A,
     b: B,
@@ -188,10 +219,9 @@ impl<A: Default, B: Default> Default for ConcatStorage<A, B> {
 
 impl<A: RawSlotPool, B: RawSlotPool> RawSlotPool for ConcatStorage<A, B> {
     fn pull_raw(&self) -> Option<usize> {
-        if let Some(idx) = self.a.pull_raw() {
-            return Some(idx);
-        }
-        self.b.pull_raw().map(|idx| idx + self.a.capacity())
+        self.a
+            .pull_raw()
+            .or_else(|| self.b.pull_raw().map(|idx| idx + self.a.capacity()))
     }
 
     /// # Safety
@@ -233,11 +263,7 @@ impl<A: SlotPoolMeta, B: SlotPoolMeta> SlotPoolMeta for ConcatStorage<A, B> {
 
 impl<A: SlotPool, B: SlotPool> SlotPool for ConcatStorage<A, B> {
     fn pull(&self) -> Option<SlotHandle> {
-        if let Some(r) = self.a.pull() {
-            Some(r)
-        } else {
-            self.b.pull()
-        }
+        self.a.pull().or_else(|| self.b.pull())
     }
 
     fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
@@ -255,76 +281,101 @@ pub(crate) trait Buffer {
     fn inner(&self) -> &[Self::Slot];
 }
 
-pub(crate) struct GenericStorage<B> {
+pub(crate) struct GenericStorage<B, C> {
     buffer: B,
-    cursor: CachePadded<AtomicUsize>,
     id: Word,
+    coherence_hint: C,
 }
 
-impl<B> GenericStorage<B> {
+impl<B, C: Default> GenericStorage<B, C> {
     pub(crate) fn new(buffer: B) -> Self {
         Self {
             buffer,
-            cursor: AtomicUsize::new(0).into(),
             id: next_id(),
+            coherence_hint: C::default(),
         }
     }
 }
 
-impl<B: Default> Default for GenericStorage<B> {
+impl<B: Default, C: Default> Default for GenericStorage<B, C> {
     fn default() -> Self {
         Self {
             buffer: B::default(),
-            cursor: AtomicUsize::new(0).into(),
             id: next_id(),
+            coherence_hint: C::default(),
         }
     }
 }
 
-impl<B> RawSlotPool for GenericStorage<B>
+fn unlikely(v: bool) -> bool {
+    if v {
+        core::hint::cold_path();
+    }
+    v
+}
+
+impl<B, C> RawSlotPool for GenericStorage<B, C>
 where
     B: Buffer,
-    B::Slot: RawSlotPool,
+    B::Slot: ShardStorage + RawSlotPool,
+    C: CoherenceProvider,
 {
     fn pull_raw(&self) -> Option<usize> {
-        if self.buffer.capacity() == 0 {
+        let inner = self.buffer.inner();
+        let cap = self.buffer.capacity();
+        // TODO: move to constructor
+        if unlikely(cap == 0) {
             return None;
         }
-        let start = self.cursor.fetch_add(1, Ordering::Relaxed) % self.buffer.capacity();
-        for offset in 0..self.buffer.capacity() {
-            let idx = (start + offset) % self.buffer.capacity();
-            let item = &self.buffer.inner()[idx];
+
+        let mut start = self.coherence_hint.current_hint() % cap;
+        self.coherence_hint.advance_hint();
+
+        let mut base_offset = start << B::Slot::SHARD_SHIFT;
+
+        for _ in 0..cap {
+            // SAFETY:
+            // we ensure that 0 <= start < SHARD SIZE and SHARD_SIZE > 0
+            let item = unsafe { inner.get_unchecked(start) };
             if let Some(inner_idx) = item.pull_raw() {
-                return Some(inner_idx + idx * item.capacity());
+                return Some(base_offset + inner_idx);
+            }
+
+            start += 1;
+            base_offset += B::Slot::SHARD_BITS;
+            if start == cap {
+                start = 0;
+                base_offset = 0;
             }
         }
+
         None
     }
 
     unsafe fn put_raw(&self, index: usize) -> bool {
-        if self.buffer.capacity() == 0 {
+        let inner = self.buffer.inner();
+        // TODO: move to constructor
+        if unlikely(self.buffer.capacity() == 0) {
             return false;
         }
-        let inner_capacity = self.buffer.inner()[0].capacity();
-        if inner_capacity == 0 {
-            return false;
-        }
-        let row = index / inner_capacity;
-        let col = index % inner_capacity;
-        self.buffer
-            .inner()
-            .get(row)
-            // SAFETY:
-            // The index was returned by self.pull_raw
-            .map(|slot| unsafe { slot.put_raw(col) })
-            .unwrap_or(false)
+
+        let row = index >> B::Slot::SHARD_SHIFT;
+        let col = index & B::Slot::SHARD_MASK;
+
+        // SAFETY:
+        // index is a valid index as returned by `pull_raw`
+        let slot = unsafe { inner.get_unchecked(row) };
+        // SAFETY:
+        // we ensure that 0 <= col < SHARD SIZE and SHARD_SIZE > 0,
+        // given that index is valid
+        unsafe { slot.put_raw(col) }
     }
 }
 
-impl<B> SlotPoolMeta for GenericStorage<B>
+impl<B, C> SlotPoolMeta for GenericStorage<B, C>
 where
     B: Buffer,
-    B::Slot: SlotPoolMeta,
+    B::Slot: SlotPoolMeta + ShardStorage,
 {
     fn is_empty(&self) -> bool {
         self.buffer.inner().iter().all(|slot| slot.is_empty())
@@ -343,10 +394,11 @@ where
     }
 }
 
-impl<B> SlotPool for GenericStorage<B>
+impl<B, C> SlotPool for GenericStorage<B, C>
 where
     B: Buffer,
-    B::Slot: RawSlotPool,
+    B::Slot: RawSlotPool + ShardStorage,
+    C: CoherenceProvider,
 {
     fn pull(&self) -> Option<SlotHandle> {
         self.pull_raw().map(|raw| SlotHandle::new(raw, self.id))
@@ -399,17 +451,22 @@ impl<T, const N: usize> Buffer for InlineBuffer<T, N> {
 /// A statically sized slot storage stored on the stack.
 ///
 /// The storage has a capacity of `N`, distributed over `SHARDS` shards of size _bits in a cacheline_
-pub struct InlineSlots<const N: usize, const SHARDS: usize> {
+pub struct InlineSlots<const N: usize, const SHARDS: usize, C = AutoCoherenceProvider> {
     raw: ConcatStorage<
-        GenericStorage<InlineBuffer<BitsetStorage, SHARDS>>,
-        GenericStorage<InlineBuffer<MaskedBitsetStorage, 1>>,
+        GenericStorage<InlineBuffer<BitsetStorage, SHARDS>, C>,
+        GenericStorage<InlineBuffer<MaskedBitsetStorage, 1>, C>,
     >,
 }
 
-impl<const N: usize, const SHARDS: usize> InlineSlots<N, SHARDS> {
-    /// Constructs a new `InlineStorage`
+impl<const N: usize, const SHARDS: usize> InlineSlots<N, SHARDS, AutoCoherenceProvider> {
+    /// Constructs a new `InlineSlots` with auto config
     pub fn new() -> Self {
-        Self {
+        Self::with_coherence_provider()
+    }
+
+    /// Constructs a new `InlineSlots` with the specified coherence provider
+    pub fn with_coherence_provider<C: CoherenceProvider + Default>() -> InlineSlots<N, SHARDS, C> {
+        InlineSlots {
             raw: ConcatStorage::new(
                 GenericStorage::new(InlineBuffer::new()),
                 GenericStorage::new(InlineBuffer::with_storage(MaskedBitsetStorage::new(
@@ -420,13 +477,15 @@ impl<const N: usize, const SHARDS: usize> InlineSlots<N, SHARDS> {
     }
 }
 
-impl<const N: usize, const SHARDS: usize> Default for InlineSlots<N, SHARDS> {
+impl<const N: usize, const SHARDS: usize> Default
+    for InlineSlots<N, SHARDS, AutoCoherenceProvider>
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const N: usize, const SHARDS: usize> SlotPoolMeta for InlineSlots<N, SHARDS> {
+impl<const N: usize, const SHARDS: usize, C> SlotPoolMeta for InlineSlots<N, SHARDS, C> {
     fn len(&self) -> usize {
         self.raw.len()
     }
@@ -444,7 +503,9 @@ impl<const N: usize, const SHARDS: usize> SlotPoolMeta for InlineSlots<N, SHARDS
     }
 }
 
-impl<const N: usize, const SHARDS: usize> RawSlotPool for InlineSlots<N, SHARDS> {
+impl<const N: usize, const SHARDS: usize, C: CoherenceProvider> RawSlotPool
+    for InlineSlots<N, SHARDS, C>
+{
     fn pull_raw(&self) -> Option<usize> {
         self.raw.pull_raw()
     }
@@ -456,7 +517,9 @@ impl<const N: usize, const SHARDS: usize> RawSlotPool for InlineSlots<N, SHARDS>
     }
 }
 
-impl<const N: usize, const SHARDS: usize> SlotPool for InlineSlots<N, SHARDS> {
+impl<const N: usize, const SHARDS: usize, C: CoherenceProvider> SlotPool
+    for InlineSlots<N, SHARDS, C>
+{
     fn pull(&self) -> Option<SlotHandle> {
         self.raw.pull()
     }
@@ -496,18 +559,23 @@ impl<T> Buffer for HeapBuf<T> {
 
 /// A statically sized index storage stored on the heap.
 #[cfg(feature = "alloc")]
-pub struct Slots {
+pub struct Slots<C> {
     raw: ConcatStorage<
-        GenericStorage<HeapBuf<BitsetStorage>>,
-        GenericStorage<InlineBuffer<MaskedBitsetStorage, 1>>,
+        GenericStorage<HeapBuf<BitsetStorage>, C>,
+        GenericStorage<InlineBuffer<MaskedBitsetStorage, 1>, C>,
     >,
 }
 
 #[cfg(feature = "alloc")]
-impl Slots {
-    /// Constructs a new `HeapStorage` with capacity `size`
+impl Slots<AutoCoherenceProvider> {
+    /// Constructs a new `Slots` instance with capacity `size`
     pub fn new(size: usize) -> Self {
-        Self {
+        Self::with_coherence_provider(size)
+    }
+
+    /// COnstructs a new `Slots` instance with specified coherence provider.
+    pub fn with_coherence_provider<C: CoherenceProvider + Default>(size: usize) -> Slots<C> {
+        Slots {
             raw: ConcatStorage::new(
                 GenericStorage::new(HeapBuf::new(full_shard_count(size))),
                 GenericStorage::new(InlineBuffer::with_storage(MaskedBitsetStorage::new(
@@ -519,7 +587,7 @@ impl Slots {
 }
 
 #[cfg(feature = "alloc")]
-impl SlotPoolMeta for Slots {
+impl<C> SlotPoolMeta for Slots<C> {
     fn len(&self) -> usize {
         self.raw.len()
     }
@@ -538,7 +606,7 @@ impl SlotPoolMeta for Slots {
 }
 
 #[cfg(feature = "alloc")]
-impl RawSlotPool for Slots {
+impl<C: CoherenceProvider> RawSlotPool for Slots<C> {
     fn pull_raw(&self) -> Option<usize> {
         self.raw.pull_raw()
     }
@@ -551,7 +619,7 @@ impl RawSlotPool for Slots {
 }
 
 #[cfg(feature = "alloc")]
-impl SlotPool for Slots {
+impl<C: CoherenceProvider> SlotPool for Slots<C> {
     fn pull(&self) -> Option<SlotHandle> {
         self.raw.pull()
     }

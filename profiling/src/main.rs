@@ -39,7 +39,7 @@ fn main() {
 }
 
 fn run_isolated(threads: usize) {
-    let slots = Arc::new(Slots::<8>::new(CAPACITY));
+    let slots = Arc::new(Slots::new(CAPACITY));
     let ops_per_thread = TOTAL_OPS / threads;
 
     let mut handles = Vec::with_capacity(threads);

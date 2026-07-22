@@ -102,7 +102,17 @@ pub use crate::storage::Slots;
 
 pub mod core {
     //! core funcitionality of `lf-slots` intended for more fine-grained control than top level exports.
-    pub use crate::storage::{full_shard_count, tail_bits};
+    #[cfg(feature = "std")]
+    pub use crate::slot_alloc::coherence::ThreadLocalRoundRobin;
+    pub use crate::{
+        slot_alloc::coherence::{
+            AutoCoherenceProvider,
+            CoherenceProvider,
+            NoCoherence,
+            StripedRoundRobin,
+        },
+        storage::{full_shard_count, tail_bits},
+    };
 }
 
 pub mod prelude {
