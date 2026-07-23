@@ -6,6 +6,7 @@ use crate::{
     bitshard::{BitsetStorage, MaskedBitsetStorage, ShardStorage},
     cache_coherence::{AutoCoherenceProvider, CoherenceProvider},
     core::{ID, RawBatch, RawSlotPool, tail_bits},
+    core_internal::unlikely,
 };
 
 pub(crate) struct ConcatStorage<A, B> {
@@ -149,13 +150,6 @@ impl<B: Default, C: Default> Default for GenericStorage<B, C> {
             coherence_hint: C::default(),
         }
     }
-}
-
-fn unlikely(v: bool) -> bool {
-    if v {
-        core::hint::cold_path();
-    }
-    v
 }
 
 impl<B, C> RawSlotPool for GenericStorage<B, C>

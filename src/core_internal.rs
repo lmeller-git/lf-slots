@@ -3,6 +3,9 @@
 /// The size of this unit differs by architecture.
 #[cfg(target_has_atomic = "64")]
 pub type Word = u64;
+/// The basic underlying storage unit.
+///
+/// The size of this unit differs by architecture.
 #[cfg(not(target_has_atomic = "64"))]
 pub type Word = u32;
 
@@ -264,3 +267,10 @@ impl Iterator for BatchIter {
 }
 
 impl ExactSizeIterator for BatchIter {}
+
+pub(crate) fn unlikely(v: bool) -> bool {
+    if v {
+        core::hint::cold_path();
+    }
+    v
+}
