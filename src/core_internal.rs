@@ -3,11 +3,11 @@
 /// The size of this unit differs by architecture.
 #[cfg(target_has_atomic = "64")]
 pub type Word = u64;
-#[cfg(target_has_atomic = "64")]
-pub(crate) type AtomicWord = crate::sync::atomic::AtomicU64;
-
 #[cfg(not(target_has_atomic = "64"))]
 pub type Word = u32;
+
+#[cfg(target_has_atomic = "64")]
+pub(crate) type AtomicWord = crate::sync::atomic::AtomicU64;
 #[cfg(not(target_has_atomic = "64"))]
 pub(crate) type AtomicWord = crate::sync::atomic::AtomicU32;
 
