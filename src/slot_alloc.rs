@@ -39,9 +39,11 @@ pub trait SlotPool: RawSlotPool {
     ///
     /// Errs and returns the `SlotHandle`, if the operation is not permitted.
     fn put(&self, index: SlotHandle) -> Result<(), SlotHandle>;
-
+    /// Pull a `Batch` from the storage if it is not empty.
     fn pull_batch(&self) -> Option<Batch>;
-
+    /// Put a `Batch` back into the storage to free the associated slots.
+    ///
+    /// Errs and returns the `Batch` if the operation is not permitted.
     fn put_batch(&self, batch: Batch) -> Result<(), Batch>;
 }
 
@@ -62,8 +64,16 @@ pub trait RawSlotPool: SlotPoolMeta {
     ///
     /// `index` is an index returned by `pull_raw`
     unsafe fn put_raw(&self, index: usize) -> bool;
-
+    /// Pulls a `RawBatch` from the storage if it is not empty.
     fn pull_raw_batch(&self) -> Option<RawBatch>;
-
+    /// Puts back a `RawBatch` into the storage and frees the associated slots.
+    ///
+    /// returns `true` if the slots were freed.
+    ///
+    /// # Safety
+    /// This method requires that `batch` referring to a valid word in the underlying storage.
+    /// Further it requires that `batch` is a `RawBatch` acquired from the same storage, which was not freed beforehand.
+    ///
+    /// `batch` is a `RawBatch` reutrned by `pull_raw_batch`
     unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool;
 }

@@ -1,3 +1,10 @@
+//! This module contains traits and types to alter the scheduling behaviour of `SlotPools`.
+//! `SlotPools` use `CoherenceProvider`s to reduce cache-line invalidation due to cross-thread contention.
+//!
+//! The default `CoherenceProvider` across this crate is `AutoCoherenceProvider`, which chooses a `CoherenceProvider` based on feature flags.
+//!
+//! If no or very low thread contention is to be expected, `NoCoherence` should be used.
+
 #[cfg(feature = "std")]
 use std::hash::{Hash, Hasher};
 
@@ -13,7 +20,7 @@ pub trait CoherenceProvider {
     fn advance_hint(&self);
 }
 
-/// Does not perfrom any scheduling
+/// Does not perfrom any scheduling.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoCoherence;
 
@@ -99,13 +106,14 @@ impl<const STRIPES: usize> CoherenceProvider for StripedRoundRobin<STRIPES> {
         self.stripes[0].fetch_add(1, Ordering::Relaxed);
     }
 }
+
 /// chooses a good default coherence provider
 #[derive(Default)]
 pub struct AutoCoherenceProvider {
     #[cfg(not(feature = "std"))]
-    provider: NoCoherence,
+    provider: StripedRoundRobin,
     #[cfg(feature = "std")]
-    provider: NoCoherence,
+    provider: ThreadLocalRoundRobin,
 }
 
 impl CoherenceProvider for AutoCoherenceProvider {

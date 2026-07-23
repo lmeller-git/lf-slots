@@ -35,9 +35,6 @@ impl<A: RawSlotPool, B: RawSlotPool> RawSlotPool for ConcatStorage<A, B> {
             .or_else(|| self.b.pull_raw().map(|idx| idx + self.a.capacity()))
     }
 
-    /// # Safety
-    /// index is in bounds and is currently used.
-    /// In other words: index is an index retunred by `ConcatStorage::pull_raw` on THIS INSTANCE.
     unsafe fn put_raw(&self, index: usize) -> bool {
         let a_cap = self.a.capacity();
         if index < a_cap {
@@ -66,8 +63,14 @@ impl<A: RawSlotPool, B: RawSlotPool> RawSlotPool for ConcatStorage<A, B> {
         let a_cap = self.a.capacity();
 
         if batch.starting_idx < a_cap {
+            // SAFETY:
+            // The index was returned by self.inner.pull_raw_batch()
+            // We just checked that it is within bounds of the allocation
             unsafe { self.a.put_raw_batch(batch) }
         } else {
+            // SAFETY:
+            // The index was returned by self.inner.pull_raw_batch()
+            // Thus it is within bounds of the allocation
             unsafe { self.b.put_raw_batch(batch) }
         }
     }
@@ -317,18 +320,18 @@ where
     }
 
     fn pull_batch(&self) -> Option<Batch> {
-        self.pull_raw_batch().map(|raw| Batch {
-            raw,
-            id: self.id.clone(),
-        })
+        self.pull_raw_batch()
+            .map(|raw| Batch::new(self.id.clone(), raw))
     }
 
     fn put_batch(&self, batch: Batch) -> Result<(), Batch> {
-        if batch.id != self.id {
+        if *batch.id() != self.id {
             return Err(batch);
         }
 
-        if unsafe { self.put_raw_batch(batch.raw) } {
+        // SAFETY:
+        // We just validated that the id is correct, thus this batch is valid
+        if unsafe { self.put_raw_batch(*batch.raw()) } {
             Ok(())
         } else {
             Err(batch)
@@ -439,6 +442,8 @@ impl<const N: usize, const SHARDS: usize, C: CoherenceProvider> RawSlotPool
     }
 
     unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
+        // SAFETY:
+        // The caller promises that this batch is valid
         unsafe { self.raw.put_raw_batch(batch) }
     }
 }
@@ -558,6 +563,8 @@ impl<C: CoherenceProvider> RawSlotPool for Slots<C> {
     }
 
     unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
+        // SAFETY:
+        // the caller promises that this batch is valid
         unsafe { self.raw.put_raw_batch(batch) }
     }
 }

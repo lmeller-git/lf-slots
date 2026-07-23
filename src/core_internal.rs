@@ -1,3 +1,6 @@
+/// The basic underlying storage unit.
+///
+/// The size of this unit differs by architecture.
 #[cfg(target_has_atomic = "64")]
 pub type Word = u64;
 #[cfg(target_has_atomic = "64")]
@@ -13,6 +16,7 @@ pub(crate) type AtomicWord = crate::sync::atomic::AtomicU32;
 pub(crate) const WORD_BYTES: usize = core::mem::size_of::<Word>();
 pub(crate) const WORD_BITS: usize = Word::BITS as usize;
 
+/// The ID associated with a `SlotPool` and the slots handed out by it.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ID {
     repr: Word,
@@ -32,6 +36,11 @@ impl ID {
 
     pub(crate) fn clone(&self) -> Self {
         Self { repr: self.repr }
+    }
+
+    /// Constructs an `ID` from a raw `Word`.
+    pub fn from_raw(raw: Word) -> Self {
+        Self { repr: raw }
     }
 }
 
@@ -56,6 +65,11 @@ impl SlotHandle {
         &self.pool_id
     }
 
+    /// Constructs a SlotHandle from an ID and a slot
+    ///
+    /// # Safety
+    /// It is always safe to construct a SlotHandle in this way, however it is NOT safe to return a SlotHandle constructed in this way to a pool.
+    /// The Safety requirements are the same as for `RawSlotPool::put_raw`.
     pub unsafe fn from_raw(pool_id: ID, slot: usize) -> Self {
         Self { pool_id, slot }
     }
@@ -74,6 +88,8 @@ impl core::fmt::Display for SlotHandle {
     }
 }
 
+/// A raw acquired word.
+/// A batch may contain between 0 and `Word::BITS` slots.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RawBatch {
     pub(crate) starting_idx: usize,
@@ -81,35 +97,24 @@ pub struct RawBatch {
 }
 
 impl RawBatch {
-    #[inline]
+    /// Counts the number of acquired slots in this batch
     pub const fn count(&self) -> usize {
         self.mask.count_ones() as usize
     }
 
-    #[inline]
+    /// Is this batch empty?
     pub const fn is_empty(&self) -> bool {
         self.mask == 0
     }
 
-    /// Creates an iterator over the slot indices in this batch.
-    #[inline]
-    pub fn iter(&self) -> RawBatchIter {
-        self.into_iter()
-    }
-
-    /// Splits this batch into two: `keep` containing the lowest `n` slots,
-    /// and `surplus` containing the remaining slots.
-    #[inline]
-    pub fn split_at(self, n: usize) -> (Self, Self) {
+    /// Splits the batch into two batches of sizes `n`, `self.count() - n`.
+    /// If `n` >= `self.count()`, returns `(self, None)`.
+    ///
+    /// Splits into (high bits, low bits).
+    pub fn split_at(self, n: usize) -> (Self, Option<Self>) {
         let total = self.count();
         if n >= total {
-            return (
-                self,
-                RawBatch {
-                    starting_idx: self.starting_idx,
-                    mask: 0,
-                },
-            );
+            return (self, None);
         }
         if n == 0 {
             return (
@@ -117,32 +122,29 @@ impl RawBatch {
                     starting_idx: self.starting_idx,
                     mask: 0,
                 },
-                self,
+                Some(self),
             );
         }
 
-        // Clear the lowest set bit `n` times to isolate the surplus mask
         let mut surplus_mask = self.mask;
         for _ in 0..n {
-            surplus_mask &= surplus_mask - 1; // x86 BLSR instruction
+            surplus_mask &= surplus_mask - 1;
         }
-
-        let keep_mask = self.mask ^ surplus_mask;
 
         (
             RawBatch {
                 starting_idx: self.starting_idx,
-                mask: keep_mask,
+                mask: self.mask ^ surplus_mask,
             },
-            RawBatch {
+            Some(RawBatch {
                 starting_idx: self.starting_idx,
                 mask: surplus_mask,
-            },
+            }),
         )
     }
 }
 
-/// Dedicated iterator for `RawBatch`.
+/// An Iterator over a `RawBatch`
 #[derive(Clone, Debug)]
 pub struct RawBatchIter {
     batch: RawBatch,
@@ -151,18 +153,16 @@ pub struct RawBatchIter {
 impl Iterator for RawBatchIter {
     type Item = usize;
 
-    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if self.batch.mask == 0 {
             None
         } else {
             let bit = self.batch.mask.trailing_zeros() as usize;
-            self.batch.mask &= self.batch.mask - 1; // Clear lowest set bit (x86 BLSR)
+            self.batch.mask &= self.batch.mask - 1;
             Some(self.batch.starting_idx + bit)
         }
     }
 
-    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let len = self.batch.count();
         (len, Some(len))
@@ -175,63 +175,92 @@ impl IntoIterator for RawBatch {
     type IntoIter = RawBatchIter;
     type Item = usize;
 
-    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         RawBatchIter { batch: self }
     }
 }
 
+/// An acquired word.
+/// A `Batch` may contain between 0 and `Word::BITS` slots.
 pub struct Batch {
-    pub(crate) raw: RawBatch,
-    pub(crate) id: ID,
+    raw: RawBatch,
+    id: ID,
 }
 
 impl Batch {
-    #[inline]
+    pub(crate) fn new(id: ID, raw: RawBatch) -> Self {
+        Self { raw, id }
+    }
+
+    pub(crate) fn id(&self) -> &ID {
+        &self.id
+    }
+
+    pub(crate) fn raw(&self) -> &RawBatch {
+        &self.raw
+    }
+
+    /// Counts the number of acquired Slots in this batch.
     pub fn count(&self) -> usize {
         self.raw.count()
     }
 
-    #[inline]
+    /// Is this batch empty?
     pub fn is_empty(&self) -> bool {
         self.raw.is_empty()
     }
+
+    /// Splits the batch into two batches of sizes `n`, `self.count() - n`.
+    /// If `n` >= `self.count()`, returns `(self, None)`.
+    ///
+    /// Splits into (high bits, low bits).
+    pub fn split_at(self, n: usize) -> (Self, Option<Self>) {
+        let (r1, r2) = self.raw.split_at(n);
+        (
+            Batch {
+                raw: r1,
+                id: self.id.clone(),
+            },
+            r2.map(|raw| Batch { raw, id: self.id }),
+        )
+    }
 }
 
-// Iterator struct that consumes Batch by value
-pub struct BatchIntoIter {
+/// An iterator over a `Batch`
+pub struct BatchIter {
     raw: RawBatchIter,
     id: ID,
 }
 
 impl IntoIterator for Batch {
-    type IntoIter = BatchIntoIter;
+    type IntoIter = BatchIter;
     type Item = SlotHandle;
 
-    #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        // Note: batch is dropped here, if Drop where to be implemented in the future in a nont-trivial manner, we would have to handle that here
-        BatchIntoIter {
+        // Note: batch is dropped here, if Drop where to be implemented in the future in a non-trivial manner, we would have to handle that here
+        BatchIter {
             raw: self.raw.into_iter(),
             id: self.id,
         }
     }
 }
 
-impl Iterator for BatchIntoIter {
+impl Iterator for BatchIter {
     type Item = SlotHandle;
 
-    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.raw.next()?;
-        // SAFETY: Unique index extracted from batch, ownership transferred
+        // SAFETY:
+        // BatchIter takes ownership of Batch.
+        // RawBatchIter::next takes ownership of a slot index.
+        // ID stays the same.
+        // The slot is not leaked.
         Some(unsafe { SlotHandle::from_raw(self.id.clone(), index) })
     }
 
-    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.raw.size_hint()
     }
 }
 
-impl ExactSizeIterator for BatchIntoIter {}
+impl ExactSizeIterator for BatchIter {}

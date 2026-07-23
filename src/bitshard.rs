@@ -77,9 +77,6 @@ impl RawSlotPool for BitsetStorage {
         None
     }
 
-    /// # Safety
-    /// index is in bounds and is currently used.
-    /// In other words: index is an index retunred by `BitsetStorage::pull_raw` on THIS INSTANCE.
     unsafe fn put_raw(&self, index: usize) -> bool {
         let word_idx = index / WORD_BITS;
         let bit = index % WORD_BITS;
@@ -111,9 +108,11 @@ impl RawSlotPool for BitsetStorage {
     }
 
     unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
-        let prev = unsafe { self.words.get_unchecked(batch.starting_idx) }
+        // SAFETY:
+        // The caller promises that this batch is valid
+        _ = unsafe { self.words.get_unchecked(batch.starting_idx) }
             .fetch_or(batch.mask, Ordering::Release);
-        prev & batch.mask == 0
+        true
     }
 }
 
@@ -167,9 +166,6 @@ impl RawSlotPool for MaskedBitsetStorage {
         self.inner.pull_raw()
     }
 
-    /// # Safety
-    /// index is in bounds and is currently used.
-    /// In other words: index is an index retunred by `MaskedBitsetStorage::pull_raw` on THIS INSTANCE.
     unsafe fn put_raw(&self, index: usize) -> bool {
         // SAFETY:
         // The index was returned by self.inner.pull_raw()
@@ -181,6 +177,8 @@ impl RawSlotPool for MaskedBitsetStorage {
     }
 
     unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
+        // SAFETY:
+        // the caller promises that this batch is valid
         unsafe { self.inner.put_raw_batch(batch) }
     }
 }

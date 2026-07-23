@@ -75,8 +75,8 @@
 //! - **ASan** - to check for memory corruption.
 //!
 
-// #![deny(missing_docs)]
-// #![deny(clippy::missing_safety_doc, clippy::undocumented_unsafe_blocks)]
+#![deny(missing_docs)]
+#![deny(clippy::missing_safety_doc, clippy::undocumented_unsafe_blocks)]
 #![warn(unsafe_op_in_unsafe_fn)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -97,7 +97,7 @@ mod slot_alloc;
 mod storage;
 mod sync;
 
-pub use core_internal::{Batch, BatchIntoIter, SlotHandle};
+pub use core_internal::{Batch, BatchIter, SlotHandle};
 pub use slot_alloc::{SlotPool, SlotPoolMeta};
 
 pub use crate::storage::InlineSlots;
@@ -105,6 +105,7 @@ pub use crate::storage::InlineSlots;
 pub use crate::storage::Slots;
 
 pub mod core {
+    //! Core functionality for the `lf-slots` crate
     pub use crate::{
         bitshard::{full_shard_count, tail_bits},
         core_internal::{ID, RawBatch, RawBatchIter, Word},
