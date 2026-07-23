@@ -110,7 +110,7 @@ impl RawSlotPool for BitsetStorage {
     unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
         // SAFETY:
         // The caller promises that this batch is valid
-        _ = unsafe { self.words.get_unchecked(batch.starting_idx) }
+        _ = unsafe { self.words.get_unchecked(batch.starting_idx / WORD_BITS) }
             .fetch_or(batch.mask, Ordering::Release);
         true
     }
