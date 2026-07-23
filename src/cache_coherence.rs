@@ -111,9 +111,15 @@ impl<const STRIPES: usize, const STEP: usize> StripedRoundRobin<STRIPES, STEP> {
 
     /// Heuristic to select a stripe based on the current stack pointer address.
     fn current_stripe_idx(&self) -> usize {
+        #[cfg(target_pointer_width = "64")]
+        const PHI: usize = 0x9E37_79B9_7F4A_7C15;
+        #[cfg(target_pointer_width = "32")]
+        const PHI: usize = 0x9E37_79B9;
+
         let dummy = 0u8;
         let stack_ptr = &dummy as *const u8 as usize;
-        let hash = stack_ptr.wrapping_mul(11400714819323198485);
+
+        let hash = stack_ptr.wrapping_mul(PHI);
         (hash >> 60) % STRIPES
     }
 }
