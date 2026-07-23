@@ -4,11 +4,11 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 use std::{env, sync::Arc, thread, time::Instant};
 
-use lf_slots::{SlotPool, Slots};
+use lf_slots::{SlotPool, Slots, core::Word};
 
 const CAPACITY: usize = 2048;
-const TOTAL_OPS: usize = 20_000_000;
-const BATCH_SIZE: usize = 16;
+const TOTAL_OPS: usize = 500_000_000;
+const BATCH_SIZE: usize = 64;
 
 fn main() {
     #[cfg(feature = "dhat-heap")]
@@ -25,6 +25,10 @@ fn main() {
         "isolated-2" => run_isolated(2),
         "isolated-4" => run_isolated(4),
         "isolated-8" => run_isolated(8),
+        "isolated_batch-1" => run_isolated_batch(1),
+        "isolated_batch-2" => run_isolated_batch(2),
+        "isolated_batch-4" => run_isolated_batch(4),
+        "isolated_batch-8" => run_isolated_batch(8),
         other => {
             eprintln!(
                 "Unknown target '{other}'. Use: isolated-1, isolated-2, isolated-4, isolated-8"
@@ -66,6 +70,35 @@ fn run_isolated(threads: usize) {
                 for handle in local_batch.drain(..) {
                     let _ = s_clone.put(handle);
                 }
+            }
+        }));
+    }
+
+    for h in handles {
+        h.join().unwrap();
+    }
+}
+
+fn run_isolated_batch(threads: usize) {
+    let slots = Arc::new(Slots::new(CAPACITY));
+    let ops_per_thread = TOTAL_OPS / threads;
+    let mut handles = Vec::with_capacity(threads);
+
+    for _ in 0..threads {
+        let s_clone = slots.clone();
+        handles.push(thread::spawn(move || {
+            let loops = ops_per_thread / Word::BITS as usize;
+
+            for _ in 0..loops {
+                let local_batch = loop {
+                    if let Some(handles) = s_clone.pull_batch() {
+                        break handles;
+                    }
+                    std::hint::spin_loop();
+                };
+
+                let local_batch = std::hint::black_box(local_batch);
+                let _ = s_clone.put_batch(local_batch);
             }
         }));
     }

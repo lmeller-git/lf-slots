@@ -185,6 +185,7 @@ impl IntoIterator for RawBatch {
 
 /// An acquired word.
 /// A `Batch` may contain between 0 and `Word::BITS` slots.
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Batch {
     raw: RawBatch,
     id: ID,

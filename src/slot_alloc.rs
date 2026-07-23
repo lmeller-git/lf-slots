@@ -1,4 +1,7 @@
-use crate::core_internal::{Batch, RawBatch, SlotHandle};
+use crate::{
+    core::ID,
+    core_internal::{Batch, RawBatch, SlotHandle},
+};
 
 /// Metadata of a Storage
 pub trait SlotPoolMeta {
@@ -26,13 +29,12 @@ pub trait SlotPoolMeta {
     }
 }
 
-// TODO: add pull_batch_exact, which pulls a batch ([SlotHandle;N]) of exact size
-// can be default impld using pull, put, pull_batch, put_batch and bathc.split_at
-
 /// Safe interface for an index storage
 ///
 /// This is a safe wrapper of `RawStorage`.
 pub trait SlotPool: RawSlotPool {
+    /// Returns the ID associated with this pool
+    fn id(&self) -> ID;
     /// Pull a `SlotHandle` from the storage if it is not empty.
     fn pull(&self) -> Option<SlotHandle>;
     /// Put a `SlotHandle` back into the storage to free the associated slot.
@@ -45,6 +47,13 @@ pub trait SlotPool: RawSlotPool {
     ///
     /// Errs and returns the `Batch` if the operation is not permitted.
     fn put_batch(&self, batch: Batch) -> Result<(), Batch>;
+
+    /// Pulls a batch of exactly `N` SlotHandles from the storage, if it contains enough slots.
+    fn pull_exact<const N: usize>(&self) -> Option<[SlotHandle; N]> {
+        let batch = RawSlotPool::pull_raw_exact(self);
+        let id = self.id();
+        batch.map(|arr| arr.map(|slot| SlotHandle::new(slot, id.clone())))
+    }
 }
 
 /// Raw interface for an index storage.
@@ -76,4 +85,61 @@ pub trait RawSlotPool: SlotPoolMeta {
     ///
     /// `batch` is a `RawBatch` reutrned by `pull_raw_batch`
     unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool;
+
+    /// Pulls a batch of exactly `N` SlotHandles from the storage, if it contains enough slots.
+    fn pull_raw_exact<const N: usize>(&self) -> Option<[usize; N]> {
+        if N > self.len() {
+            return None;
+        }
+        let mut batch = core::array::from_fn(|_| core::mem::MaybeUninit::uninit());
+        let mut total_count = 0;
+        while let Some(pulled_batch) = self.pull_raw_batch()
+            && pulled_batch.count() > 0
+        {
+            let count = pulled_batch.count();
+            if count + total_count >= N {
+                let (l, r) = pulled_batch.split_at(N - total_count);
+                if let Some(r) = r {
+                    // SAFETY:
+                    // we just got these slots from the pool and will not use them anymore.
+                    unsafe { self.put_raw_batch(r) };
+                }
+                for (to, from) in batch[total_count..N].iter_mut().zip(l) {
+                    to.write(from);
+                }
+                // SAFETY:
+                // we populated total_count == N == batch.capacity() slots with valid SlotHandles
+                return Some(unsafe {
+                    (&batch as *const [core::mem::MaybeUninit<usize>; N])
+                        .cast::<[usize; N]>()
+                        .read()
+                });
+            }
+            for (to, from) in batch[total_count..total_count + count]
+                .iter_mut()
+                .zip(pulled_batch)
+            {
+                to.write(from);
+            }
+            total_count += count;
+        }
+
+        for taken in &batch[..total_count] {
+            // SAFETY:
+            // we took these slots from the same pool, have not freed them, will not use them and will not free them again.
+            unsafe {
+                self.put_raw(
+                    // SAFETY:
+                    // we populated N - total_count slots with valid SlotHandles and didnt free them yet.
+                    // we populated the first N - total_count slots in batch.
+                    #[allow(unused_unsafe)]
+                    unsafe {
+                        taken.assume_init_read()
+                    },
+                )
+            };
+        }
+
+        None
+    }
 }

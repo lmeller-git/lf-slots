@@ -12,11 +12,16 @@ use crate::{
 pub(crate) struct ConcatStorage<A, B> {
     a: A,
     b: B,
+    id: ID,
 }
 
 impl<A, B> ConcatStorage<A, B> {
     pub(crate) fn new(a: A, b: B) -> Self {
-        Self { a, b }
+        Self {
+            a,
+            b,
+            id: ID::next(),
+        }
     }
 }
 
@@ -25,6 +30,7 @@ impl<A: Default, B: Default> Default for ConcatStorage<A, B> {
         Self {
             a: A::default(),
             b: B::default(),
+            id: ID::next(),
         }
     }
 }
@@ -72,7 +78,12 @@ impl<A: RawSlotPool, B: RawSlotPool> RawSlotPool for ConcatStorage<A, B> {
             // SAFETY:
             // The index was returned by self.inner.pull_raw_batch()
             // Thus it is within bounds of the allocation
-            unsafe { self.b.put_raw_batch(batch) }
+            unsafe {
+                self.b.put_raw_batch(RawBatch {
+                    starting_idx: batch.starting_idx - a_cap,
+                    mask: batch.mask,
+                })
+            }
         }
     }
 }
@@ -95,27 +106,47 @@ impl<A: SlotPoolMeta, B: SlotPoolMeta> SlotPoolMeta for ConcatStorage<A, B> {
     }
 }
 
-impl<A: SlotPool, B: SlotPool> SlotPool for ConcatStorage<A, B> {
+impl<A: RawSlotPool, B: RawSlotPool> SlotPool for ConcatStorage<A, B> {
+    fn id(&self) -> ID {
+        self.id.clone()
+    }
+
     fn pull(&self) -> Option<SlotHandle> {
-        self.a.pull().or_else(|| self.b.pull())
+        self.pull_raw()
+            .map(|slot| SlotHandle::new(slot, self.id.clone()))
     }
 
     fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
-        if let Err(handle) = self.a.put(index) {
-            return self.b.put(handle);
+        if *index.id() != self.id {
+            return Err(index);
         }
-        Ok(())
+        // SAFETY:
+        // we just checked that this batch was created by us.
+        // Capacity checks will be performed by put_raw
+        if unsafe { self.put_raw(index.as_usize()) } {
+            Ok(())
+        } else {
+            Err(index)
+        }
     }
 
     fn pull_batch(&self) -> Option<Batch> {
-        self.a.pull_batch().or_else(|| self.b.pull_batch())
+        self.pull_raw_batch()
+            .map(|batch| Batch::new(self.id.clone(), batch))
     }
 
     fn put_batch(&self, batch: Batch) -> Result<(), Batch> {
-        if let Err(batch) = self.a.put_batch(batch) {
-            return self.b.put_batch(batch);
+        if *batch.id() != self.id {
+            return Err(batch);
         }
-        Ok(())
+        // SAFETY:
+        // we just checked that this batch was created by us.
+        // Capacity checks will be performed by put_raw_batch
+        if unsafe { self.put_raw_batch(*batch.raw()) } {
+            Ok(())
+        } else {
+            Err(batch)
+        }
     }
 }
 
@@ -128,7 +159,6 @@ pub(crate) trait Buffer {
 
 pub(crate) struct GenericStorage<B, C> {
     buffer: B,
-    id: ID,
     coherence_hint: C,
 }
 
@@ -136,7 +166,6 @@ impl<B, C: Default> GenericStorage<B, C> {
     pub(crate) fn new(buffer: B) -> Self {
         Self {
             buffer,
-            id: ID::next(),
             coherence_hint: C::default(),
         }
     }
@@ -146,7 +175,6 @@ impl<B: Default, C: Default> Default for GenericStorage<B, C> {
     fn default() -> Self {
         Self {
             buffer: B::default(),
-            id: ID::next(),
             coherence_hint: C::default(),
         }
     }
@@ -289,50 +317,6 @@ where
     }
 }
 
-impl<B, C> SlotPool for GenericStorage<B, C>
-where
-    B: Buffer,
-    B::Slot: RawSlotPool + ShardStorage,
-    C: CoherenceProvider,
-{
-    fn pull(&self) -> Option<SlotHandle> {
-        self.pull_raw()
-            .map(|raw| SlotHandle::new(raw, self.id.clone()))
-    }
-
-    fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
-        if *index.id() != self.id {
-            return Err(index);
-        }
-        // SAFETY:
-        // we just checked the id
-        if unsafe { self.put_raw(index.as_usize()) } {
-            Ok(())
-        } else {
-            Err(index)
-        }
-    }
-
-    fn pull_batch(&self) -> Option<Batch> {
-        self.pull_raw_batch()
-            .map(|raw| Batch::new(self.id.clone(), raw))
-    }
-
-    fn put_batch(&self, batch: Batch) -> Result<(), Batch> {
-        if *batch.id() != self.id {
-            return Err(batch);
-        }
-
-        // SAFETY:
-        // We just validated that the id is correct, thus this batch is valid
-        if unsafe { self.put_raw_batch(*batch.raw()) } {
-            Ok(())
-        } else {
-            Err(batch)
-        }
-    }
-}
-
 pub(crate) struct InlineBuffer<T, const N: usize> {
     buf: [T; N],
 }
@@ -445,6 +429,10 @@ impl<const N: usize, const SHARDS: usize, C: CoherenceProvider> RawSlotPool
 impl<const N: usize, const SHARDS: usize, C: CoherenceProvider> SlotPool
     for InlineSlots<N, SHARDS, C>
 {
+    fn id(&self) -> ID {
+        self.raw.id()
+    }
+
     fn pull(&self) -> Option<SlotHandle> {
         self.raw.pull()
     }
@@ -565,6 +553,10 @@ impl<C: CoherenceProvider> RawSlotPool for Slots<C> {
 
 #[cfg(feature = "alloc")]
 impl<C: CoherenceProvider> SlotPool for Slots<C> {
+    fn id(&self) -> ID {
+        self.raw.id()
+    }
+
     fn pull(&self) -> Option<SlotHandle> {
         self.raw.pull()
     }

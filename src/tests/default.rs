@@ -1,5 +1,7 @@
 use crate::{
     SlotPool,
+    SlotPoolMeta,
+    cache_coherence::NoCoherence,
     core::RawSlotPool,
     define_inline_slots,
     tests::stubs::{
@@ -47,6 +49,14 @@ fn holds_n() {
 
     while let Some(idx) = storage.pull() {
         assert!(idx.as_usize() < 42);
+    }
+}
+
+#[test]
+fn order() {
+    let storage = Storage2000::with_coherence_provider::<NoCoherence>();
+    for i in 0..storage.capacity() {
+        assert_eq!(i, storage.pull_raw().unwrap());
     }
 }
 
@@ -274,5 +284,43 @@ mod batch_tests {
             total_capacity,
             "Total claimed slots should equal pool capacity"
         );
+    }
+
+    #[test]
+    fn pull_exact() {
+        let pool = create_test_pool();
+
+        let handles = pool.pull_exact::<16>().unwrap();
+        assert_eq!(handles.len(), 16);
+        assert_eq!(pool.len(), pool.capacity() - 16);
+        for handle in handles {
+            pool.put(handle).unwrap();
+        }
+        assert!(pool.is_full());
+        assert_eq!(pool.pull_exact::<1>().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn pool_exact_large() {
+        let pool = Slots::new(128);
+
+        assert!(pool.pull_exact::<256>().is_none());
+
+        let batch_80 = pool.pull_exact::<80>().unwrap();
+        assert_eq!(batch_80.len(), 80);
+
+        // Verify the remaining 48 slots are still available and were not lost
+        let batch_48 = pool.pull_exact::<48>();
+        assert!(
+            batch_48.is_some(),
+            "Leftovers from previous batch split should still be in pool"
+        );
+
+        // Pool should now be completely empty
+        assert!(
+            pool.pull_exact::<1>().is_none(),
+            "Pool should be empty after taking 16 + 48"
+        );
+        assert!(pool.is_empty());
     }
 }
