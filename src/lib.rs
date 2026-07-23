@@ -1,13 +1,13 @@
-//! `lf-slots` provides datastructures for distributing and managing unique slot indices across multiple threads.
+//! `lf-slots` provides data structures for distributing and managing unique slot indices across multiple threads.
 //!
-//! All storage types in this repository are safe to use in a concurrent context, strictly lock-free and will never block the calling thread.
+//! All storage types in this crate are safe to use in a concurrent context, strictly lock-free, and will never block the calling thread.
 //!
 //! ## Storage Types
 //!
-//! - **InlineSlots**: statically sized stack allocated storage.
-//! - **Slots**: statically sized heap allocated storage.
+//! - [`InlineSlots`]: statically sized, stack-allocated storage.
+//! - [`Slots`]: statically sized, heap-allocated storage.
 //!
-//! Due to limitations with current const expr resolution, InlineSlots should be declared with `define_inline_slots` in order to have the correct size and layout.
+//! Due to limitations with current `const` expression resolution, [`InlineSlots`] should be declared with [`define_inline_slots!`] in order to have the correct size and layout.
 //!
 //! ## Usage
 //!
@@ -35,7 +35,7 @@
 //! ```rust
 //! #[cfg(feature = "alloc")]
 //! fn run() {
-//!  use lf_slots::{Slots, SlotPool,  SlotPoolMeta};
+//!  use lf_slots::{Slots, SlotPool, SlotPoolMeta};
 //!
 //!  let pool = Slots::new(42);
 //!
@@ -55,25 +55,36 @@
 //!
 //! ## Platform Support
 //!
-//! All storage types use 64 bit or 32 bit atomics, depending on platform. Thus only platforms with 32-bit or 64-bit native atomics are supported.
-//! If the feature `atomic-fallback` is used, no native atomics are necessary.
+//! All storage types use 64-bit or 32-bit atomics depending on the platform. Thus, only platforms with 32-bit or 64-bit native atomics are supported by default.
+//! If the feature `atomic-fallback` is used, no native atomics are necessary and all target platforms are supported.
 //!
-//! Layout of storage types is determined based on platform architecture to optimize cache line coherence.
+//! The memory layout of storage types is determined based on the target platform architecture to optimize cache line usage.
+//!
+//! ## Performance
+//!
+//! Under heavy multi-threaded workloads, naive lock-free slot pools can experience throughput drops due to cross-core cache-line invalidation.
+//!
+//! To mitigate this, this crate provides [`cache_coherence::CoherenceProvider`] strategies in the [`cache_coherence`] module,
+//! which aim to reduce cross-core cache invalidation by spreading cross-core memory accesses across the data structure.
+//!
+//! > **NOTE**:
+//! > The throughput of different scheduling strategies depends heavily on your specific workload and thread count.
+//! > For maximum performance, custom [`cache_coherence::CoherenceProvider`] implementations may need to be used and should be chosen based on benchmarks for your specific concurrency patterns.
 //!
 //! ## Feature Flags
 //!
 //! - `std`: Enables `std` and `alloc` support.
-//! - `alloc`: Enables `alloc` support, allowing usage of some dynamically allocated queues.
-//! - `atomic-fallback`: Uses `portable-atomic` `fallback` feature for atomics if necessary. It is discouraged to use this feature, as `fallback` internally uses locks.
-//! - `default`: []
+//! - `alloc`: Enables `alloc` support, allowing usage of dynamically allocated slot pools.
+//! - `atomic-fallback`: Uses the `portable-atomic` fallback feature if native atomics are missing. It is discouraged to use this feature when performance matters, as fallback atomics internally rely on locks.
+//! - `default`: None
 //!
 //! ## Testing
+//!
 //! Current testing is based on:
 //!
-//! - **Miri** - to validate pointer arithmetic and catch UB.
-//! - **Loom and Shuttle** - to test for race conditions and blocking code.
+//! - **Miri** - to validate pointer arithmetic and catch undefined behavior.
+//! - **Loom and Shuttle** - to test for race conditions and non-blocking invariants.
 //! - **ASan** - to check for memory corruption.
-//!
 
 #![deny(missing_docs)]
 #![deny(clippy::missing_safety_doc, clippy::undocumented_unsafe_blocks)]
