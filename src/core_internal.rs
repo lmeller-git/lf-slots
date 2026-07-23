@@ -40,11 +40,6 @@ impl ID {
     pub(crate) fn clone(&self) -> Self {
         Self { repr: self.repr }
     }
-
-    /// Constructs an `ID` from a raw `Word`.
-    pub fn from_raw(raw: Word) -> Self {
-        Self { repr: raw }
-    }
 }
 
 /// An owned handle for an allocated slot in a storage.
@@ -57,6 +52,8 @@ pub struct SlotHandle {
 }
 
 impl SlotHandle {
+    /// While this method is not unsafe in itself, it can be used to unsafely put a slot into a storage via the safe `SlotPool` API.
+    /// This method _SHOULD_ be marked as unsafe, if it were public, however it _SHOULD_ be fine to leave it as safe for crate internal usage.
     pub(crate) fn new(idx: usize, id: ID) -> Self {
         Self {
             pool_id: id,
@@ -66,15 +63,6 @@ impl SlotHandle {
 
     pub(crate) fn id(&self) -> &ID {
         &self.pool_id
-    }
-
-    /// Constructs a SlotHandle from an ID and a slot
-    ///
-    /// # Safety
-    /// It is always safe to construct a SlotHandle in this way, however it is NOT safe to return a SlotHandle constructed in this way to a pool.
-    /// The Safety requirements are the same as for `RawSlotPool::put_raw`.
-    pub unsafe fn from_raw(pool_id: ID, slot: usize) -> Self {
-        Self { pool_id, slot }
     }
 
     /// returns the underlying slot index of this handle
@@ -241,7 +229,7 @@ impl IntoIterator for Batch {
     type Item = SlotHandle;
 
     fn into_iter(self) -> Self::IntoIter {
-        // Note: batch is dropped here, if Drop where to be implemented in the future in a non-trivial manner, we would have to handle that here
+        // NOTE: batch is dropped here, if Drop where to be implemented in the future in a non-trivial manner, we would have to handle that here
         BatchIter {
             raw: self.raw.into_iter(),
             id: self.id,
@@ -259,7 +247,7 @@ impl Iterator for BatchIter {
         // RawBatchIter::next takes ownership of a slot index.
         // ID stays the same.
         // The slot is not leaked.
-        Some(unsafe { SlotHandle::from_raw(self.id.clone(), index) })
+        Some(SlotHandle::new(index, self.id.clone()))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

@@ -3,9 +3,9 @@ use crate::{
     SlotHandle,
     SlotPool,
     SlotPoolMeta,
-    bitshard::{BitsetStorage, MaskedBitsetStorage, ShardStorage},
+    bitshard::{BITS_PER_CACHE_LINE, BitsetStorage, MaskedBitsetStorage, ShardStorage},
     cache_coherence::{AutoCoherenceProvider, CoherenceProvider},
-    core::{ID, RawBatch, RawSlotPool, tail_bits},
+    core::{ID, RawBatch, RawSlotPool, Word, tail_bits},
     core_internal::unlikely,
 };
 
@@ -195,7 +195,6 @@ where
         }
 
         let mut start = self.coherence_hint.current_hint() % cap;
-        self.coherence_hint.advance_hint();
 
         let mut base_offset = start << B::Slot::SHARD_SHIFT;
 
@@ -204,6 +203,8 @@ where
             // we ensure that 0 <= start < SHARD SIZE and SHARD_SIZE > 0
             let item = unsafe { inner.get_unchecked(start) };
             if let Some(inner_idx) = item.pull_raw() {
+                self.coherence_hint
+                    .advance_hint_by(BITS_PER_CACHE_LINE / Word::BITS as usize);
                 return Some(base_offset + inner_idx);
             }
 
@@ -246,7 +247,6 @@ where
         }
 
         let mut start = self.coherence_hint.current_hint() % cap;
-        self.coherence_hint.advance_hint();
 
         let mut base_offset = start << B::Slot::SHARD_SHIFT;
 
@@ -256,6 +256,7 @@ where
             let item = unsafe { inner.get_unchecked(start) };
             if let Some(mut inner_batch) = item.pull_raw_batch() {
                 inner_batch.starting_idx += base_offset;
+                self.coherence_hint.advance_hint_by(Word::BITS as usize);
                 return Some(inner_batch);
             }
 
@@ -292,6 +293,62 @@ where
                 mask: batch.mask,
             })
         }
+    }
+
+    fn pull_raw_exact<const N: usize>(&self) -> Option<[usize; N]> {
+        if N > self.len() {
+            return None;
+        }
+        let mut batch = core::array::from_fn(|_| core::mem::MaybeUninit::uninit());
+        let mut total_count = 0;
+        while let Some(pulled_batch) = self.pull_raw_batch()
+            && pulled_batch.count() > 0
+        {
+            let count = pulled_batch.count();
+            if count + total_count >= N {
+                let (l, r) = pulled_batch.split_at(N - total_count);
+                if let Some(r) = r {
+                    // SAFETY:
+                    // we just got these slots from the pool and will not use them anymore.
+                    unsafe { self.put_raw_batch(r) };
+                }
+                for (to, from) in batch[total_count..N].iter_mut().zip(l) {
+                    to.write(from);
+                }
+                // SAFETY:
+                // we populated total_count == N == batch.capacity() slots with valid SlotHandles
+                return Some(unsafe {
+                    (&batch as *const [core::mem::MaybeUninit<usize>; N])
+                        .cast::<[usize; N]>()
+                        .read()
+                });
+            }
+            for (to, from) in batch[total_count..total_count + count]
+                .iter_mut()
+                .zip(pulled_batch)
+            {
+                to.write(from);
+            }
+            total_count += count;
+        }
+
+        for taken in &batch[..total_count] {
+            // SAFETY:
+            // we took these slots from the same pool, have not freed them, will not use them and will not free them again.
+            unsafe {
+                self.put_raw(
+                    // SAFETY:
+                    // we populated N - total_count slots with valid SlotHandles and didnt free them yet.
+                    // we populated the first N - total_count slots in batch.
+                    #[allow(unused_unsafe)]
+                    unsafe {
+                        taken.assume_init_read()
+                    },
+                )
+            };
+        }
+
+        None
     }
 }
 
