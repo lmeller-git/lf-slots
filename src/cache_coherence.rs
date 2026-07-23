@@ -16,9 +16,10 @@ use crossbeam_utils::CachePadded;
 #[cfg(feature = "std")]
 use thread_local::ThreadLocal;
 
-#[cfg(feature = "std")]
-use crate::bitshard::{BITS_PER_CACHE_LINE, WORDS_PER_CACHE_LINE};
-use crate::sync::atomic::{AtomicUsize, Ordering};
+use crate::{
+    bitshard::BITS_PER_CACHE_LINE,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 /// interface for a type used to improve cacheline coherence under contention
 pub trait CoherenceProvider {
