@@ -35,18 +35,50 @@ pub trait SlotPoolMeta {
 pub trait SlotPool: RawSlotPool {
     /// Returns the ID associated with this pool
     fn id(&self) -> ID;
+
     /// Pull a `SlotHandle` from the storage if it is not empty.
-    fn pull(&self) -> Option<SlotHandle>;
+    fn pull(&self) -> Option<SlotHandle> {
+        RawSlotPool::pull_raw(self).map(|idx| SlotHandle::new(idx, self.id()))
+    }
+
     /// Put a `SlotHandle` back into the storage to free the associated slot.
     ///
     /// Errs and returns the `SlotHandle`, if the operation is not permitted.
-    fn put(&self, index: SlotHandle) -> Result<(), SlotHandle>;
+    fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
+        if *index.id() != self.id() {
+            return Err(index);
+        }
+
+        // SAFETY:
+        // we just validated that the index is associated with this pool
+        if unsafe { RawSlotPool::put_raw(self, index.as_usize()) } {
+            Ok(())
+        } else {
+            Err(index)
+        }
+    }
+
     /// Pull a `Batch` from the storage if it is not empty.
-    fn pull_batch(&self) -> Option<Batch>;
+    fn pull_batch(&self) -> Option<Batch> {
+        RawSlotPool::pull_raw_batch(self).map(|raw| Batch::new(self.id(), raw))
+    }
+
     /// Put a `Batch` back into the storage to free the associated slots.
     ///
     /// Errs and returns the `Batch` if the operation is not permitted.
-    fn put_batch(&self, batch: Batch) -> Result<(), Batch>;
+    fn put_batch(&self, batch: Batch) -> Result<(), Batch> {
+        if *batch.id() != self.id() {
+            return Err(batch);
+        }
+
+        // SAFETY:
+        // we just validated that the batch is associated with this pool
+        if unsafe { RawSlotPool::put_raw_batch(self, *batch.raw()) } {
+            Ok(())
+        } else {
+            Err(batch)
+        }
+    }
 
     /// Pulls a batch of exactly `N` SlotHandles from the storage, if it contains enough slots.
     fn pull_exact<const N: usize>(&self) -> Option<[SlotHandle; N]> {

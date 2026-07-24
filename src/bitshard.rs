@@ -22,6 +22,8 @@ pub(crate) trait ShardStorage {
     const SHARD_BITS: usize;
     const SHARD_SHIFT: u32;
     const SHARD_MASK: usize;
+
+    fn raw_words(&self) -> &[AtomicWord];
 }
 
 const _: () = assert!(
@@ -138,81 +140,13 @@ impl ShardStorage for BitsetStorage {
     const SHARD_BITS: usize = BITS_PER_CACHE_LINE;
     const SHARD_MASK: usize = BITS_PER_CACHE_LINE - 1;
     const SHARD_SHIFT: u32 = BITS_PER_CACHE_LINE.ilog2();
-}
 
-pub(crate) struct MaskedBitsetStorage {
-    inner: BitsetStorage,
-    usable: u32,
-}
-
-impl MaskedBitsetStorage {
-    pub(crate) fn new(usable: usize) -> Self {
-        debug_assert!(usable <= BITS_PER_CACHE_LINE);
-        let inner = BitsetStorage::default();
-        for bit in usable..BITS_PER_CACHE_LINE {
-            let word_idx = bit / WORD_BITS;
-            let b = bit % WORD_BITS;
-            inner.words[word_idx].fetch_and(!(1 << b), Ordering::Relaxed);
-        }
-        Self {
-            inner,
-            usable: usable as u32,
-        }
+    fn raw_words(&self) -> &[AtomicWord] {
+        self.words.as_ref()
     }
-}
-
-impl RawSlotPool for MaskedBitsetStorage {
-    fn pull_raw(&self) -> Option<usize> {
-        self.inner.pull_raw()
-    }
-
-    unsafe fn put_raw(&self, index: usize) -> bool {
-        // SAFETY:
-        // The index was returned by self.inner.pull_raw()
-        unsafe { self.inner.put_raw(index) }
-    }
-
-    fn pull_raw_batch(&self) -> Option<RawBatch> {
-        self.inner.pull_raw_batch()
-    }
-
-    unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
-        // SAFETY:
-        // the caller promises that this batch is valid
-        unsafe { self.inner.put_raw_batch(batch) }
-    }
-}
-
-impl SlotPoolMeta for MaskedBitsetStorage {
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    fn is_full(&self) -> bool {
-        self.len() == self.usable as usize
-    }
-
-    fn len(&self) -> usize {
-        self.inner.free_count()
-    }
-
-    fn capacity(&self) -> usize {
-        self.usable as usize
-    }
-}
-
-impl ShardStorage for MaskedBitsetStorage {
-    const SHARD_BITS: usize = BITS_PER_CACHE_LINE;
-    const SHARD_MASK: usize = BITS_PER_CACHE_LINE - 1;
-    const SHARD_SHIFT: u32 = BITS_PER_CACHE_LINE.ilog2();
 }
 
 /// Computes the numer of shards used to store `n` slots
 pub const fn full_shard_count(n: usize) -> usize {
-    n / BITS_PER_CACHE_LINE
-}
-
-/// Computes how many bits in the last shard should stay unused to sotre exactly `n` slots
-pub const fn tail_bits(n: usize) -> usize {
-    n % BITS_PER_CACHE_LINE
+    n.div_ceil(BITS_PER_CACHE_LINE)
 }

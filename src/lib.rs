@@ -118,7 +118,7 @@ pub use crate::storage::Slots;
 pub mod core {
     //! Core functionality for the `lf-slots` crate
     pub use crate::{
-        bitshard::{full_shard_count, tail_bits},
+        bitshard::full_shard_count,
         core_internal::{ID, RawBatch, RawBatchIter, Word},
         slot_alloc::RawSlotPool,
     };
@@ -137,10 +137,10 @@ pub mod prelude {
 /// ```rust
 /// use lf_slots::{define_inline_slots, SlotPool};
 ///
-/// define_inline_slots!(pub(crate) SlotPool0, 0);
+/// define_inline_slots!(pub(crate) SlotPool1, 1);
 ///
-/// let pool: SlotPool0 = SlotPool0::new();
-/// assert!(pool.pull().is_none());
+/// let pool: SlotPool1 = SlotPool1::new();
+/// assert!(pool.pull().is_some());
 /// ```
 #[macro_export]
 macro_rules! define_inline_slots {

@@ -3,152 +3,11 @@ use crate::{
     SlotHandle,
     SlotPool,
     SlotPoolMeta,
-    bitshard::{BITS_PER_CACHE_LINE, BitsetStorage, MaskedBitsetStorage, ShardStorage},
+    bitshard::{BITS_PER_CACHE_LINE, BitsetStorage, ShardStorage},
     cache_coherence::{AutoCoherenceProvider, CoherenceProvider},
-    core::{ID, RawBatch, RawSlotPool, Word, tail_bits},
-    core_internal::unlikely,
+    core::{ID, RawBatch, RawSlotPool, Word},
+    sync::atomic::Ordering,
 };
-
-pub(crate) struct ConcatStorage<A, B> {
-    a: A,
-    b: B,
-    id: ID,
-}
-
-impl<A, B> ConcatStorage<A, B> {
-    pub(crate) fn new(a: A, b: B) -> Self {
-        Self {
-            a,
-            b,
-            id: ID::next(),
-        }
-    }
-}
-
-impl<A: Default, B: Default> Default for ConcatStorage<A, B> {
-    fn default() -> Self {
-        Self {
-            a: A::default(),
-            b: B::default(),
-            id: ID::next(),
-        }
-    }
-}
-
-impl<A: RawSlotPool, B: RawSlotPool> RawSlotPool for ConcatStorage<A, B> {
-    fn pull_raw(&self) -> Option<usize> {
-        self.a
-            .pull_raw()
-            .or_else(|| self.b.pull_raw().map(|idx| idx + self.a.capacity()))
-    }
-
-    unsafe fn put_raw(&self, index: usize) -> bool {
-        let a_cap = self.a.capacity();
-        if index < a_cap {
-            // SAFETY:
-            // The index was returned by self.inner.pull_raw()
-            // We just checked that it is within bounds of the allocation
-            unsafe { self.a.put_raw(index) }
-        } else {
-            // SAFETY:
-            // The index was returned by self.inner.pull_raw()
-            // Thus it is within bounds of the allocation
-            unsafe { self.b.put_raw(index - a_cap) }
-        }
-    }
-
-    fn pull_raw_batch(&self) -> Option<RawBatch> {
-        self.a.pull_raw_batch().or_else(|| {
-            self.b.pull_raw_batch().map(|mut batch| {
-                batch.starting_idx += self.a.capacity();
-                batch
-            })
-        })
-    }
-
-    unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
-        let a_cap = self.a.capacity();
-
-        if batch.starting_idx < a_cap {
-            // SAFETY:
-            // The index was returned by self.inner.pull_raw_batch()
-            // We just checked that it is within bounds of the allocation
-            unsafe { self.a.put_raw_batch(batch) }
-        } else {
-            // SAFETY:
-            // The index was returned by self.inner.pull_raw_batch()
-            // Thus it is within bounds of the allocation
-            unsafe {
-                self.b.put_raw_batch(RawBatch {
-                    starting_idx: batch.starting_idx - a_cap,
-                    mask: batch.mask,
-                })
-            }
-        }
-    }
-}
-
-impl<A: SlotPoolMeta, B: SlotPoolMeta> SlotPoolMeta for ConcatStorage<A, B> {
-    fn is_empty(&self) -> bool {
-        self.a.is_empty() && self.b.is_empty()
-    }
-
-    fn is_full(&self) -> bool {
-        self.a.is_full() && self.b.is_full()
-    }
-
-    fn len(&self) -> usize {
-        self.a.len() + self.b.len()
-    }
-
-    fn capacity(&self) -> usize {
-        self.a.capacity() + self.b.capacity()
-    }
-}
-
-impl<A: RawSlotPool, B: RawSlotPool> SlotPool for ConcatStorage<A, B> {
-    fn id(&self) -> ID {
-        self.id.clone()
-    }
-
-    fn pull(&self) -> Option<SlotHandle> {
-        self.pull_raw()
-            .map(|slot| SlotHandle::new(slot, self.id.clone()))
-    }
-
-    fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
-        if *index.id() != self.id {
-            return Err(index);
-        }
-        // SAFETY:
-        // we just checked that this batch was created by us.
-        // Capacity checks will be performed by put_raw
-        if unsafe { self.put_raw(index.as_usize()) } {
-            Ok(())
-        } else {
-            Err(index)
-        }
-    }
-
-    fn pull_batch(&self) -> Option<Batch> {
-        self.pull_raw_batch()
-            .map(|batch| Batch::new(self.id.clone(), batch))
-    }
-
-    fn put_batch(&self, batch: Batch) -> Result<(), Batch> {
-        if *batch.id() != self.id {
-            return Err(batch);
-        }
-        // SAFETY:
-        // we just checked that this batch was created by us.
-        // Capacity checks will be performed by put_raw_batch
-        if unsafe { self.put_raw_batch(*batch.raw()) } {
-            Ok(())
-        } else {
-            Err(batch)
-        }
-    }
-}
 
 pub(crate) trait Buffer {
     type Slot;
@@ -160,22 +19,60 @@ pub(crate) trait Buffer {
 pub(crate) struct GenericStorage<B, C> {
     buffer: B,
     coherence_hint: C,
+    id: ID,
+    capacity: usize,
 }
 
-impl<B, C: Default> GenericStorage<B, C> {
-    pub(crate) fn new(buffer: B) -> Self {
+impl<B, C> GenericStorage<B, C>
+where
+    C: Default,
+    B: Buffer,
+    B::Slot: ShardStorage,
+{
+    pub(crate) fn new(buffer: B, capacity: usize) -> Self {
+        assert!(
+            buffer.capacity() > 0,
+            "The SlotPool should have a capacity greater 0"
+        );
+        let total_bits = buffer.capacity() * <B::Slot as ShardStorage>::SHARD_BITS;
+        let dead_slots = total_bits - capacity;
+
+        if dead_slots > 0 {
+            let last_shard = buffer.inner().last().unwrap();
+            let words = last_shard.raw_words();
+
+            let tail_bits = capacity % <B::Slot as ShardStorage>::SHARD_BITS;
+            let mut valid_words = tail_bits / Word::BITS as usize;
+            let rem_bits = tail_bits % Word::BITS as usize;
+
+            if rem_bits > 0 {
+                let mask = (1 << rem_bits) - 1;
+                words[valid_words].fetch_and(mask, Ordering::Relaxed);
+                valid_words += 1;
+            }
+            for b in &words[valid_words..] {
+                b.fetch_and(0, Ordering::Relaxed);
+            }
+        }
+
         Self {
             buffer,
             coherence_hint: C::default(),
+            id: ID::next(),
+            capacity,
         }
     }
 }
 
-impl<B: Default, C: Default> Default for GenericStorage<B, C> {
+impl<B: Default + Buffer, C: Default> Default for GenericStorage<B, C> {
     fn default() -> Self {
+        let buffer = B::default();
+        let capacity = buffer.capacity();
         Self {
-            buffer: B::default(),
+            buffer,
             coherence_hint: C::default(),
+            id: ID::next(),
+            capacity,
         }
     }
 }
@@ -189,13 +86,8 @@ where
     fn pull_raw(&self) -> Option<usize> {
         let inner = self.buffer.inner();
         let cap = self.buffer.capacity();
-        // TODO: move to constructor
-        if unlikely(cap == 0) {
-            return None;
-        }
 
         let mut start = self.coherence_hint.current_hint() % cap;
-
         let mut base_offset = start << B::Slot::SHARD_SHIFT;
 
         for _ in 0..cap {
@@ -221,10 +113,6 @@ where
 
     unsafe fn put_raw(&self, index: usize) -> bool {
         let inner = self.buffer.inner();
-        // TODO: move to constructor
-        if unlikely(self.buffer.capacity() == 0) {
-            return false;
-        }
 
         let row = index >> B::Slot::SHARD_SHIFT;
         let col = index & B::Slot::SHARD_MASK;
@@ -241,13 +129,8 @@ where
     fn pull_raw_batch(&self) -> Option<RawBatch> {
         let inner = self.buffer.inner();
         let cap = self.buffer.capacity();
-        // TODO: move to constructor
-        if unlikely(cap == 0) {
-            return None;
-        }
 
         let mut start = self.coherence_hint.current_hint() % cap;
-
         let mut base_offset = start << B::Slot::SHARD_SHIFT;
 
         for _ in 0..cap {
@@ -273,10 +156,6 @@ where
 
     unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
         let inner = self.buffer.inner();
-        // TODO: move to constructor
-        if unlikely(self.buffer.capacity() == 0) {
-            return false;
-        }
 
         let row = batch.starting_idx >> B::Slot::SHARD_SHIFT;
         let col = batch.starting_idx & B::Slot::SHARD_MASK;
@@ -294,61 +173,16 @@ where
             })
         }
     }
+}
 
-    fn pull_raw_exact<const N: usize>(&self) -> Option<[usize; N]> {
-        if N > self.len() {
-            return None;
-        }
-        let mut batch = core::array::from_fn(|_| core::mem::MaybeUninit::uninit());
-        let mut total_count = 0;
-        while let Some(pulled_batch) = self.pull_raw_batch()
-            && pulled_batch.count() > 0
-        {
-            let count = pulled_batch.count();
-            if count + total_count >= N {
-                let (l, r) = pulled_batch.split_at(N - total_count);
-                if let Some(r) = r {
-                    // SAFETY:
-                    // we just got these slots from the pool and will not use them anymore.
-                    unsafe { self.put_raw_batch(r) };
-                }
-                for (to, from) in batch[total_count..N].iter_mut().zip(l) {
-                    to.write(from);
-                }
-                // SAFETY:
-                // we populated total_count == N == batch.capacity() slots with valid SlotHandles
-                return Some(unsafe {
-                    (&batch as *const [core::mem::MaybeUninit<usize>; N])
-                        .cast::<[usize; N]>()
-                        .read()
-                });
-            }
-            for (to, from) in batch[total_count..total_count + count]
-                .iter_mut()
-                .zip(pulled_batch)
-            {
-                to.write(from);
-            }
-            total_count += count;
-        }
-
-        for taken in &batch[..total_count] {
-            // SAFETY:
-            // we took these slots from the same pool, have not freed them, will not use them and will not free them again.
-            unsafe {
-                self.put_raw(
-                    // SAFETY:
-                    // we populated N - total_count slots with valid SlotHandles and didnt free them yet.
-                    // we populated the first N - total_count slots in batch.
-                    #[allow(unused_unsafe)]
-                    unsafe {
-                        taken.assume_init_read()
-                    },
-                )
-            };
-        }
-
-        None
+impl<B, C> SlotPool for GenericStorage<B, C>
+where
+    B: Buffer,
+    B::Slot: RawSlotPool + ShardStorage,
+    C: CoherenceProvider,
+{
+    fn id(&self) -> ID {
+        self.id.clone()
     }
 }
 
@@ -357,20 +191,16 @@ where
     B: Buffer,
     B::Slot: SlotPoolMeta + ShardStorage,
 {
-    fn is_empty(&self) -> bool {
-        self.buffer.inner().iter().all(|slot| slot.is_empty())
-    }
-
-    fn is_full(&self) -> bool {
-        self.buffer.inner().iter().all(|slot| slot.is_full())
-    }
-
     fn len(&self) -> usize {
-        self.buffer.inner().iter().map(|slot| slot.len()).sum()
+        self.buffer
+            .inner()
+            .iter()
+            .map(|slot| slot.len())
+            .sum::<usize>()
     }
 
     fn capacity(&self) -> usize {
-        self.buffer.inner().iter().map(|slot| slot.capacity()).sum()
+        self.capacity
     }
 }
 
@@ -386,6 +216,7 @@ impl<T: Default, const N: usize> InlineBuffer<T, N> {
     }
 }
 
+#[allow(unused)]
 impl<T> InlineBuffer<T, 1> {
     pub(crate) fn with_storage(storage: T) -> Self {
         Self { buf: [storage] }
@@ -408,10 +239,7 @@ impl<T, const N: usize> Buffer for InlineBuffer<T, N> {
 ///
 /// The storage has a capacity of `N`, distributed over `SHARDS` shards of size _bits in a cacheline_
 pub struct InlineSlots<const N: usize, const SHARDS: usize, C = AutoCoherenceProvider> {
-    raw: ConcatStorage<
-        GenericStorage<InlineBuffer<BitsetStorage, SHARDS>, C>,
-        GenericStorage<InlineBuffer<MaskedBitsetStorage, 1>, C>,
-    >,
+    raw: GenericStorage<InlineBuffer<BitsetStorage, SHARDS>, C>,
 }
 
 impl<const N: usize, const SHARDS: usize> InlineSlots<N, SHARDS, AutoCoherenceProvider> {
@@ -422,13 +250,13 @@ impl<const N: usize, const SHARDS: usize> InlineSlots<N, SHARDS, AutoCoherencePr
 
     /// Constructs a new `InlineSlots` with the specified coherence provider
     pub fn with_coherence_provider<C: CoherenceProvider + Default>() -> InlineSlots<N, SHARDS, C> {
+        assert!(
+            SHARDS * BITS_PER_CACHE_LINE >= N,
+            "InlineSlots: SHARDS ({SHARDS}) is too small to hold capacity N ({N}). Required shards: {}",
+            crate::bitshard::full_shard_count(N)
+        );
         InlineSlots {
-            raw: ConcatStorage::new(
-                GenericStorage::new(InlineBuffer::new()),
-                GenericStorage::new(InlineBuffer::with_storage(MaskedBitsetStorage::new(
-                    tail_bits(N),
-                ))),
-            ),
+            raw: GenericStorage::new(InlineBuffer::new(), N),
         }
     }
 }
@@ -538,10 +366,7 @@ impl<T> Buffer for HeapBuf<T> {
 /// A statically sized index storage stored on the heap.
 #[cfg(feature = "alloc")]
 pub struct Slots<C> {
-    raw: ConcatStorage<
-        GenericStorage<HeapBuf<BitsetStorage>, C>,
-        GenericStorage<InlineBuffer<MaskedBitsetStorage, 1>, C>,
-    >,
+    raw: GenericStorage<HeapBuf<BitsetStorage>, C>,
 }
 
 #[cfg(feature = "alloc")]
@@ -556,12 +381,7 @@ impl Slots<AutoCoherenceProvider> {
         use crate::core::full_shard_count;
 
         Slots {
-            raw: ConcatStorage::new(
-                GenericStorage::new(HeapBuf::new(full_shard_count(size))),
-                GenericStorage::new(InlineBuffer::with_storage(MaskedBitsetStorage::new(
-                    tail_bits(size),
-                ))),
-            ),
+            raw: GenericStorage::new(HeapBuf::new(full_shard_count(size)), size),
         }
     }
 }

@@ -256,10 +256,3 @@ impl Iterator for BatchIter {
 }
 
 impl ExactSizeIterator for BatchIter {}
-
-pub(crate) fn unlikely(v: bool) -> bool {
-    if v {
-        core::hint::cold_path();
-    }
-    v
-}
