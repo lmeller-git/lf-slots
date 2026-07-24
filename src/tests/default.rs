@@ -18,108 +18,113 @@ use crate::{
         spsc,
     },
 };
+mod inline {
+    use super::*;
 
-define_inline_slots!(Storage2, 2);
+    define_inline_slots!(Storage2, 2);
 
-define_inline_slots!(Storage10, 10);
+    define_inline_slots!(Storage10, 10);
 
-define_inline_slots!(Storage2000, 2000);
+    #[cfg(not(miri))]
+    define_inline_slots!(Storage2000, 2000);
+    #[cfg(miri)]
+    define_inline_slots!(Storage2000, 20);
 
-#[test]
-fn smoke_impl() {
-    let storage = Storage2::new();
-    smoke(storage);
-}
-
-#[test]
-fn holds_n() {
-    define_inline_slots!(Storage42, 42);
-
-    let storage = Storage42::new();
-
-    while let Some(idx) = storage.pull_raw() {
-        assert!(idx < 42);
+    #[test]
+    fn smoke_impl() {
+        let storage = Storage2::new();
+        smoke(storage);
     }
 
-    for i in 0..42 {
-        // SAFETY:
-        // the cap is 43 and the pool is empty
-        unsafe { storage.put_raw(i) };
+    #[test]
+    fn holds_n() {
+        define_inline_slots!(Storage42, 42);
+
+        let storage = Storage42::new();
+
+        while let Some(idx) = storage.pull_raw() {
+            assert!(idx < 42);
+        }
+
+        for i in 0..42 {
+            // SAFETY:
+            // the cap is 43 and the pool is empty
+            unsafe { storage.put_raw(i) };
+        }
+
+        while let Some(idx) = storage.pull() {
+            assert!(idx.as_usize() < 42);
+        }
     }
 
-    while let Some(idx) = storage.pull() {
-        assert!(idx.as_usize() < 42);
+    #[test]
+    fn order() {
+        let storage = Storage2000::with_coherence_provider::<NoCoherence>();
+        for i in 0..storage.capacity() {
+            assert_eq!(i, storage.pull_raw().unwrap());
+        }
+    }
+
+    #[test]
+    fn len_impl() {
+        let storage = Storage2::new();
+        len_empty_full(storage);
+    }
+
+    #[test]
+    fn smoke_long_impl() {
+        let storage = Storage10::new();
+        smoke_long(storage);
+    }
+
+    #[test]
+    fn spsc_impl() {
+        let storage = Storage2000::new();
+        spsc(storage);
+    }
+
+    #[test]
+    fn mpsc_impl() {
+        let storage = Storage2000::new();
+        mpsc(storage);
+    }
+
+    #[test]
+    fn mpmc_impl() {
+        let storage = Storage2000::new();
+        mpmc(storage);
+    }
+
+    #[test]
+    fn linearizable_impl() {
+        let storage = Storage10::new();
+        linearizable(storage);
+    }
+
+    #[test]
+    fn smoke_batch_impl() {
+        let storage = Storage2000::new();
+        batch_smoke(storage);
+    }
+
+    #[test]
+    fn batch_spsc_impl() {
+        let storage = Storage2000::new();
+        batch_spsc(storage);
+    }
+
+    #[test]
+    fn batch_mpmc_impl() {
+        let storage = Storage2000::new();
+        batch_mpmc(storage);
+    }
+
+    #[test]
+    fn mixed_mpmc_impl() {
+        let storage = Storage2000::new();
+        mixed_mpmc(storage);
     }
 }
-
-#[test]
-fn order() {
-    let storage = Storage2000::with_coherence_provider::<NoCoherence>();
-    for i in 0..storage.capacity() {
-        assert_eq!(i, storage.pull_raw().unwrap());
-    }
-}
-
-#[test]
-fn len_impl() {
-    let storage = Storage2::new();
-    len_empty_full(storage);
-}
-
-#[test]
-fn smoke_long_impl() {
-    let storage = Storage10::new();
-    smoke_long(storage);
-}
-
-#[test]
-fn spsc_impl() {
-    let storage = Storage2000::new();
-    spsc(storage);
-}
-
-#[test]
-fn mpsc_impl() {
-    let storage = Storage2000::new();
-    mpsc(storage);
-}
-
-#[test]
-fn mpmc_impl() {
-    let storage = Storage2000::new();
-    mpmc(storage);
-}
-
-#[test]
-fn linearizable_impl() {
-    let storage = Storage10::new();
-    linearizable(storage);
-}
-
-#[test]
-fn smoke_batch_impl() {
-    let storage = Storage2000::new();
-    batch_smoke(storage);
-}
-
-#[test]
-fn batch_spsc_impl() {
-    let storage = Storage2000::new();
-    batch_spsc(storage);
-}
-
-#[test]
-fn batch_mpmc_impl() {
-    let storage = Storage2000::new();
-    batch_mpmc(storage);
-}
-
-#[test]
-fn mixed_mpmc_impl() {
-    let storage = Storage2000::new();
-    mixed_mpmc(storage);
-}
-
 #[cfg(feature = "alloc")]
 mod heap {
     use super::*;
@@ -207,6 +212,115 @@ mod heap {
     #[test]
     fn mixed_mpmc_impl() {
         let storage = Slots::new(2000);
+        mixed_mpmc(storage);
+    }
+}
+
+mod word_slots {
+    use super::*;
+    use crate::define_inline_wordslots;
+
+    define_inline_wordslots!(Storage2, 2);
+
+    define_inline_wordslots!(Storage10, 10);
+
+    #[cfg(not(miri))]
+    define_inline_slots!(Storage2000, 2000);
+    #[cfg(miri)]
+    define_inline_slots!(Storage2000, 20);
+
+    #[test]
+    fn smoke_impl() {
+        let storage = Storage2::new();
+        smoke(storage);
+    }
+
+    #[test]
+    fn holds_n() {
+        define_inline_wordslots!(Storage42, 42);
+
+        let storage = Storage42::new();
+
+        while let Some(idx) = storage.pull_raw() {
+            assert!(idx < 42);
+        }
+
+        for i in 0..42 {
+            // SAFETY:
+            // the cap is 43 and the pool is empty
+            unsafe { storage.put_raw(i) };
+        }
+
+        while let Some(idx) = storage.pull() {
+            assert!(idx.as_usize() < 42);
+        }
+    }
+
+    #[test]
+    fn order() {
+        let storage = Storage2000::with_coherence_provider::<NoCoherence>();
+        for i in 0..storage.capacity() {
+            assert_eq!(i, storage.pull_raw().unwrap());
+        }
+    }
+
+    #[test]
+    fn len_impl() {
+        let storage = Storage2::new();
+        len_empty_full(storage);
+    }
+
+    #[test]
+    fn smoke_long_impl() {
+        let storage = Storage10::new();
+        smoke_long(storage);
+    }
+
+    #[test]
+    fn spsc_impl() {
+        let storage = Storage2000::new();
+        spsc(storage);
+    }
+
+    #[test]
+    fn mpsc_impl() {
+        let storage = Storage2000::new();
+        mpsc(storage);
+    }
+
+    #[test]
+    fn mpmc_impl() {
+        let storage = Storage2000::new();
+        mpmc(storage);
+    }
+
+    #[test]
+    fn linearizable_impl() {
+        let storage = Storage10::new();
+        linearizable(storage);
+    }
+
+    #[test]
+    fn smoke_batch_impl() {
+        let storage = Storage2000::new();
+        batch_smoke(storage);
+    }
+
+    #[test]
+    fn batch_spsc_impl() {
+        let storage = Storage2000::new();
+        batch_spsc(storage);
+    }
+
+    #[test]
+    fn batch_mpmc_impl() {
+        let storage = Storage2000::new();
+        batch_mpmc(storage);
+    }
+
+    #[test]
+    fn mixed_mpmc_impl() {
+        let storage = Storage2000::new();
         mixed_mpmc(storage);
     }
 }

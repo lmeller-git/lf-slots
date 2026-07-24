@@ -110,15 +110,16 @@ mod sync;
 
 pub use core_internal::{Batch, BatchIter, SlotHandle};
 pub use slot_alloc::{SlotPool, SlotPoolMeta};
+pub use storage::batched;
 
 pub use crate::storage::InlineSlots;
 #[cfg(feature = "alloc")]
-pub use crate::storage::Slots;
+pub use crate::storage::{Slots, batched::WordSlots};
 
 pub mod core {
     //! Core functionality for the `lf-slots` crate
     pub use crate::{
-        bitshard::full_shard_count,
+        bitshard::{shard_count, words_per_shard},
         core_internal::{ID, RawBatch, RawBatchIter, Word},
         slot_alloc::RawSlotPool,
     };
@@ -129,7 +130,7 @@ pub mod prelude {
     pub use crate::{SlotPool, SlotPoolMeta};
 }
 
-/// Define a type alias for an `InlineSlots<N, { shards(N) }>`.
+/// Define a type alias for an `InlineSlots<N, { shards(N) }, { words_per_shard(N) }>`.
 /// Computes the number of shards needed for a slot pool of size `N` and defines a type alias with correct layout for it.
 ///
 /// Usage:
@@ -145,6 +146,32 @@ pub mod prelude {
 #[macro_export]
 macro_rules! define_inline_slots {
     ($vis:vis $name:ident, $n:expr) => {
-        $vis type $name = $crate::InlineSlots<$n, { $crate::core::full_shard_count($n) }>;
+        $vis type $name = $crate::InlineSlots<$n, { $crate::core::shard_count($n) }, { $crate::core::words_per_shard($n) }>;
+    };
+}
+
+/// Defines a type alias for a `WordPool<InlineSlots<{ N * WordBits }, { shards(N * WordBits) }, { words_per_shard(N * WordBits) }>>`
+/// Computes the number of shards needed for a word slot pool of size `N` and defines a type alias with correct layout for it.
+///
+/// Usage:
+///
+/// ```rust
+/// use lf_slots::{define_inline_wordslots, SlotPool};
+///
+/// define_inline_wordslots!(pub(crate) SlotPool1, 1);
+///
+/// let pool: SlotPool1 = SlotPool1::new();
+/// assert!(pool.pull().is_some());
+/// ```
+#[macro_export]
+macro_rules! define_inline_wordslots {
+    ($vis:vis $name:ident, $n:expr) => {
+        $vis type $name = $crate::batched::WordPool<
+            $crate::InlineSlots<
+                { $n * $crate::core::Word::BITS as usize },
+                { $crate::core::shard_count($n * $crate::core::Word::BITS as usize) },
+                { $crate::core::words_per_shard($n * $crate::core::Word::BITS as usize) }
+            >
+        >;
     };
 }

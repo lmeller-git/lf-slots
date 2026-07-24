@@ -3,9 +3,10 @@ use crate::{
     SlotHandle,
     SlotPool,
     SlotPoolMeta,
-    bitshard::{BITS_PER_CACHE_LINE, BitsetStorage, ShardStorage},
+    bitshard::{BitsetStorage, ShardStorage, WORDS_PER_CACHE_LINE},
     cache_coherence::{AutoCoherenceProvider, CoherenceProvider},
     core::{ID, RawBatch, RawSlotPool, Word},
+    core_internal::WORD_BITS,
     sync::atomic::Ordering,
 };
 
@@ -43,7 +44,7 @@ where
 
             let tail_bits = capacity % <B::Slot as ShardStorage>::SHARD_BITS;
             let mut valid_words = tail_bits / Word::BITS as usize;
-            let rem_bits = tail_bits % Word::BITS as usize;
+            let rem_bits = tail_bits % WORD_BITS;
 
             if rem_bits > 0 {
                 let mask = (1 << rem_bits) - 1;
@@ -96,7 +97,7 @@ where
             let item = unsafe { inner.get_unchecked(start) };
             if let Some(inner_idx) = item.pull_raw() {
                 self.coherence_hint
-                    .advance_hint_by(BITS_PER_CACHE_LINE / Word::BITS as usize);
+                    .advance_hint_by(<B::Slot as ShardStorage>::SHARD_BITS / WORD_BITS);
                 return Some(base_offset + inner_idx);
             }
 
@@ -139,7 +140,7 @@ where
             let item = unsafe { inner.get_unchecked(start) };
             if let Some(mut inner_batch) = item.pull_raw_batch() {
                 inner_batch.starting_idx += base_offset;
-                self.coherence_hint.advance_hint_by(Word::BITS as usize);
+                self.coherence_hint.advance_hint_by(WORD_BITS);
                 return Some(inner_batch);
             }
 
@@ -238,22 +239,30 @@ impl<T, const N: usize> Buffer for InlineBuffer<T, N> {
 /// A statically sized slot storage stored on the stack.
 ///
 /// The storage has a capacity of `N`, distributed over `SHARDS` shards of size _bits in a cacheline_
-pub struct InlineSlots<const N: usize, const SHARDS: usize, C = AutoCoherenceProvider> {
-    raw: GenericStorage<InlineBuffer<BitsetStorage, SHARDS>, C>,
+pub struct InlineSlots<
+    const N: usize,
+    const SHARDS: usize,
+    const WORDS_PER_SHARD: usize = WORDS_PER_CACHE_LINE,
+    C = AutoCoherenceProvider,
+> {
+    raw: GenericStorage<InlineBuffer<BitsetStorage<WORDS_PER_SHARD>, SHARDS>, C>,
 }
 
-impl<const N: usize, const SHARDS: usize> InlineSlots<N, SHARDS, AutoCoherenceProvider> {
+impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize>
+    InlineSlots<N, SHARDS, WORDS_PER_SHARD, AutoCoherenceProvider>
+{
     /// Constructs a new `InlineSlots` with auto config
     pub fn new() -> Self {
         Self::with_coherence_provider()
     }
 
     /// Constructs a new `InlineSlots` with the specified coherence provider
-    pub fn with_coherence_provider<C: CoherenceProvider + Default>() -> InlineSlots<N, SHARDS, C> {
+    pub fn with_coherence_provider<C: CoherenceProvider + Default>()
+    -> InlineSlots<N, SHARDS, WORDS_PER_SHARD, C> {
         assert!(
-            SHARDS * BITS_PER_CACHE_LINE >= N,
+            SHARDS * WORDS_PER_SHARD * WORD_BITS >= N,
             "InlineSlots: SHARDS ({SHARDS}) is too small to hold capacity N ({N}). Required shards: {}",
-            crate::bitshard::full_shard_count(N)
+            crate::bitshard::shard_count(N)
         );
         InlineSlots {
             raw: GenericStorage::new(InlineBuffer::new(), N),
@@ -261,15 +270,17 @@ impl<const N: usize, const SHARDS: usize> InlineSlots<N, SHARDS, AutoCoherencePr
     }
 }
 
-impl<const N: usize, const SHARDS: usize> Default
-    for InlineSlots<N, SHARDS, AutoCoherenceProvider>
+impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize> Default
+    for InlineSlots<N, SHARDS, WORDS_PER_SHARD, AutoCoherenceProvider>
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const N: usize, const SHARDS: usize, C> SlotPoolMeta for InlineSlots<N, SHARDS, C> {
+impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C> SlotPoolMeta
+    for InlineSlots<N, SHARDS, WORDS_PER_SHARD, C>
+{
     fn len(&self) -> usize {
         self.raw.len()
     }
@@ -287,8 +298,8 @@ impl<const N: usize, const SHARDS: usize, C> SlotPoolMeta for InlineSlots<N, SHA
     }
 }
 
-impl<const N: usize, const SHARDS: usize, C: CoherenceProvider> RawSlotPool
-    for InlineSlots<N, SHARDS, C>
+impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C: CoherenceProvider>
+    RawSlotPool for InlineSlots<N, SHARDS, WORDS_PER_SHARD, C>
 {
     fn pull_raw(&self) -> Option<usize> {
         self.raw.pull_raw()
@@ -311,8 +322,8 @@ impl<const N: usize, const SHARDS: usize, C: CoherenceProvider> RawSlotPool
     }
 }
 
-impl<const N: usize, const SHARDS: usize, C: CoherenceProvider> SlotPool
-    for InlineSlots<N, SHARDS, C>
+impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C: CoherenceProvider>
+    SlotPool for InlineSlots<N, SHARDS, WORDS_PER_SHARD, C>
 {
     fn id(&self) -> ID {
         self.raw.id()
@@ -376,12 +387,13 @@ impl Slots<AutoCoherenceProvider> {
         Self::with_coherence_provider(size)
     }
 
-    /// COnstructs a new `Slots` instance with specified coherence provider.
+    /// Constructs a new `Slots` instance with specified coherence provider.
     pub fn with_coherence_provider<C: CoherenceProvider + Default>(size: usize) -> Slots<C> {
-        use crate::core::full_shard_count;
-
         Slots {
-            raw: GenericStorage::new(HeapBuf::new(full_shard_count(size)), size),
+            raw: GenericStorage::new(
+                HeapBuf::new(size.div_ceil(crate::bitshard::BITS_PER_CACHE_LINE)),
+                size,
+            ),
         }
     }
 }
@@ -448,5 +460,131 @@ impl<C: CoherenceProvider> SlotPool for Slots<C> {
 
     fn put_batch(&self, batch: Batch) -> Result<(), Batch> {
         self.raw.put_batch(batch)
+    }
+}
+
+#[doc(hidden)]
+pub mod batched {
+    use super::*;
+
+    /// A wrapper around SlotPools, which retinerepts Batches as Slots,
+    /// allowing some performance optimizations in some cases
+    #[allow(unnameable_types)]
+    #[doc(hidden)]
+    #[repr(transparent)]
+    pub struct WordPool<P> {
+        inner: P,
+    }
+
+    impl<P> WordPool<P> {
+        /// huhu
+        pub(crate) fn new_in(inner: P) -> Self {
+            Self { inner }
+        }
+    }
+
+    impl<P: SlotPoolMeta> SlotPoolMeta for WordPool<P> {
+        fn len(&self) -> usize {
+            self.inner.len() / WORD_BITS
+        }
+
+        fn capacity(&self) -> usize {
+            self.inner.capacity() / WORD_BITS
+        }
+
+        fn is_empty(&self) -> bool {
+            self.inner.len() < WORD_BITS
+        }
+
+        fn is_full(&self) -> bool {
+            (self.inner.capacity() - self.inner.len()) < WORD_BITS
+        }
+    }
+
+    impl<P: RawSlotPool> RawSlotPool for WordPool<P> {
+        fn pull_raw_batch(&self) -> Option<RawBatch> {
+            let inner_batch = self.inner.pull_raw_batch()?;
+            let word_idx = inner_batch.starting_idx / WORD_BITS;
+
+            Some(RawBatch {
+                starting_idx: word_idx,
+                mask: 1,
+            })
+        }
+
+        unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
+            let bit_idx = batch.starting_idx * WORD_BITS;
+
+            let full_word_batch = RawBatch {
+                starting_idx: bit_idx,
+                mask: Word::MAX,
+            };
+
+            // SAFETY: Caller guarantees batch validity
+            unsafe { self.inner.put_raw_batch(full_word_batch) }
+        }
+
+        fn pull_raw(&self) -> Option<usize> {
+            self.pull_raw_batch().map(|b| b.starting_idx)
+        }
+
+        unsafe fn put_raw(&self, index: usize) -> bool {
+            // SAFETY: Caller guarantees index validity
+            unsafe {
+                self.put_raw_batch(RawBatch {
+                    starting_idx: index,
+                    mask: Word::MAX,
+                })
+            }
+        }
+    }
+
+    impl<P: SlotPool> SlotPool for WordPool<P> {
+        fn id(&self) -> ID {
+            self.inner.id()
+        }
+    }
+
+    impl<const WORD_CAPACITY: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize>
+        WordPool<InlineSlots<WORD_CAPACITY, SHARDS, WORDS_PER_SHARD, AutoCoherenceProvider>>
+    {
+        /// Constructs a new Inlined Word Pool
+        pub fn new() -> Self {
+            Self::with_coherence_provider()
+        }
+
+        /// Constructs a new `Slots` instance with specified coherence provider.
+        pub fn with_coherence_provider<C: CoherenceProvider + Default>()
+        -> WordPool<InlineSlots<WORD_CAPACITY, SHARDS, WORDS_PER_SHARD, C>> {
+            WordPool::new_in(InlineSlots::with_coherence_provider())
+        }
+    }
+
+    impl<const WORD_CAPACITY: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize> Default
+        for WordPool<InlineSlots<WORD_CAPACITY, SHARDS, WORDS_PER_SHARD, AutoCoherenceProvider>>
+    {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    /// A word-granularity heap-allocated slot storage.
+    /// Slots are stored as words.
+    #[cfg(feature = "alloc")]
+    pub type WordSlots<C = AutoCoherenceProvider> = WordPool<Slots<C>>;
+
+    #[cfg(feature = "alloc")]
+    impl WordSlots<AutoCoherenceProvider> {
+        /// Constructs a new `WordSlots` instance
+        pub fn new(size: usize) -> Self {
+            Self::with_coherence_provider(size)
+        }
+
+        /// Constructs a new `WordSlots` instance with specified coherence provider.
+        pub fn with_coherence_provider<C: CoherenceProvider + Default>(
+            size: usize,
+        ) -> WordSlots<C> {
+            WordPool::new_in(Slots::with_coherence_provider(size * WORD_BITS))
+        }
     }
 }

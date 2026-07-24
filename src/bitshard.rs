@@ -28,15 +28,16 @@ pub(crate) trait ShardStorage {
 
 const _: () = assert!(
     BITS_PER_CACHE_LINE.is_power_of_two(),
-    "BITS_PER_CACHE_LINE must be a power of two for bitwise math to work!"
+    "BITS_PER_CACHE_LINE must be a power of two for bitwise math to work"
 );
 
-pub(crate) struct BitsetStorage {
-    words: CachePadded<[AtomicWord; WORDS_PER_CACHE_LINE]>,
+pub(crate) struct BitsetStorage<const WORDS: usize = WORDS_PER_CACHE_LINE> {
+    words: CachePadded<[AtomicWord; WORDS]>,
 }
 
-impl BitsetStorage {
+impl<const WORDS: usize> BitsetStorage<WORDS> {
     fn free_count(&self) -> usize {
+        const { assert!(WORDS.is_power_of_two()) };
         self.words
             .iter()
             .map(|w| w.load(Ordering::Acquire).count_ones() as usize)
@@ -44,15 +45,16 @@ impl BitsetStorage {
     }
 }
 
-impl Default for BitsetStorage {
+impl<const WORDS: usize> Default for BitsetStorage<WORDS> {
     fn default() -> Self {
+        const { assert!(WORDS.is_power_of_two()) };
         Self {
             words: core::array::from_fn(|_| AtomicWord::new(Word::MAX)).into(),
         }
     }
 }
 
-impl RawSlotPool for BitsetStorage {
+impl<const WORDS: usize> RawSlotPool for BitsetStorage<WORDS> {
     fn pull_raw(&self) -> Option<usize> {
         for (word_idx, word) in self.words.iter().enumerate() {
             let mut current = word.load(Ordering::Relaxed);
@@ -118,13 +120,13 @@ impl RawSlotPool for BitsetStorage {
     }
 }
 
-impl SlotPoolMeta for BitsetStorage {
+impl<const WORDS: usize> SlotPoolMeta for BitsetStorage<WORDS> {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     fn is_full(&self) -> bool {
-        self.len() == BITS_PER_CACHE_LINE
+        self.len() == Self::SHARD_BITS
     }
 
     fn len(&self) -> usize {
@@ -132,21 +134,46 @@ impl SlotPoolMeta for BitsetStorage {
     }
 
     fn capacity(&self) -> usize {
-        BITS_PER_CACHE_LINE
+        Self::SHARD_BITS
     }
 }
 
-impl ShardStorage for BitsetStorage {
-    const SHARD_BITS: usize = BITS_PER_CACHE_LINE;
-    const SHARD_MASK: usize = BITS_PER_CACHE_LINE - 1;
-    const SHARD_SHIFT: u32 = BITS_PER_CACHE_LINE.ilog2();
+impl<const WORDS: usize> ShardStorage for BitsetStorage<WORDS> {
+    const SHARD_BITS: usize = WORDS * WORD_BITS;
+    const SHARD_MASK: usize = Self::SHARD_BITS - 1;
+    const SHARD_SHIFT: u32 = Self::SHARD_BITS.ilog2();
 
     fn raw_words(&self) -> &[AtomicWord] {
         self.words.as_ref()
     }
 }
 
-/// Computes the numer of shards used to store `n` slots
-pub const fn full_shard_count(n: usize) -> usize {
-    n.div_ceil(BITS_PER_CACHE_LINE)
+pub(crate) const TARGET_SHARDS: usize = 8;
+
+/// Computes the optimal number of words per shard to balance shard count with memory consumption.
+/// Returns between 1 and `WORDS_PER_CACHE_LINE`, targetting at least `TARGET_SHARDS` shards per pool.
+pub const fn words_per_shard(capacity: usize) -> usize {
+    if capacity == 0 {
+        return 0;
+    }
+
+    let ideal_bits_per_shard = capacity.div_ceil(TARGET_SHARDS);
+    let ideal_words = ideal_bits_per_shard.div_ceil(WORD_BITS);
+    let words_p2 = ideal_words.next_power_of_two();
+
+    // TODO use clamp once Ord is const
+    if words_p2 > WORDS_PER_CACHE_LINE {
+        WORDS_PER_CACHE_LINE
+    } else if words_p2 < 1 {
+        1
+    } else {
+        words_p2
+    }
+}
+
+/// Calculates the number of shards used to store `capacity` slots.
+pub const fn shard_count(capacity: usize) -> usize {
+    let words = words_per_shard(capacity);
+    let shard_bits = words * WORD_BITS;
+    capacity.div_ceil(shard_bits)
 }
