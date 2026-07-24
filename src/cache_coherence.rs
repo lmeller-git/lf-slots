@@ -162,11 +162,11 @@ impl<const STRIPES: usize, const STEP: usize> CoherenceProvider
 /// chooses a good default coherence provider
 #[derive(Default)]
 pub struct AutoCoherenceProvider {
-    #[cfg(any(loom, shuttle))]
+    #[cfg(any(loom, shuttle, test))]
     provider: NoCoherence,
-    #[cfg(all(not(feature = "std"), not(loom), not(shuttle)))]
+    #[cfg(all(not(feature = "std"), not(test), not(loom), not(shuttle)))]
     provider: StripedRoundRobin,
-    #[cfg(all(feature = "std", not(loom), not(shuttle)))]
+    #[cfg(all(feature = "std", not(test), not(loom), not(shuttle)))]
     provider: ThreadLocalRoundRobin,
 }
 
