@@ -376,7 +376,7 @@ impl<T> Buffer for HeapBuf<T> {
 
 /// A statically sized index storage stored on the heap.
 #[cfg(feature = "alloc")]
-pub struct Slots<C> {
+pub struct Slots<C = AutoCoherenceProvider> {
     raw: GenericStorage<HeapBuf<BitsetStorage>, C>,
 }
 
