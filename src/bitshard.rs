@@ -12,10 +12,12 @@ use crate::{
 #[cfg(not(loom))]
 #[allow(unused_qualifications)]
 pub(crate) const CACHE_LINE_BYTES: usize = core::mem::align_of::<CachePadded<()>>();
+/// The numer of words that can be packed on one cacheline/shard
 #[cfg(not(loom))]
-pub(crate) const WORDS_PER_CACHE_LINE: usize = CACHE_LINE_BYTES / WORD_BYTES;
+pub const WORDS_PER_CACHE_LINE: usize = CACHE_LINE_BYTES / WORD_BYTES;
+/// The numer of words that can be packed on one cacheline/shard
 #[cfg(loom)]
-pub(crate) const WORDS_PER_CACHE_LINE: usize = 1;
+pub const WORDS_PER_CACHE_LINE: usize = 1;
 pub(crate) const BITS_PER_CACHE_LINE: usize = WORDS_PER_CACHE_LINE * WORD_BITS;
 
 pub(crate) trait ShardStorage {
@@ -172,8 +174,7 @@ pub const fn words_per_shard(capacity: usize) -> usize {
 }
 
 /// Calculates the number of shards used to store `capacity` slots.
-pub const fn shard_count(capacity: usize) -> usize {
-    let words = words_per_shard(capacity);
-    let shard_bits = words * WORD_BITS;
+pub const fn shard_count(capacity: usize, words_per_shard: usize) -> usize {
+    let shard_bits = words_per_shard * WORD_BITS;
     capacity.div_ceil(shard_bits)
 }

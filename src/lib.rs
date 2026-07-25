@@ -119,7 +119,7 @@ pub use crate::storage::{Slots, batched::WordSlots};
 pub mod core {
     //! Core functionality for the `lf-slots` crate
     pub use crate::{
-        bitshard::{shard_count, words_per_shard},
+        bitshard::{WORDS_PER_CACHE_LINE, shard_count, words_per_shard},
         core_internal::{ID, RawBatch, RawBatchIter, Word},
         slot_alloc::RawSlotPool,
     };
@@ -138,15 +138,26 @@ pub mod prelude {
 /// ```rust
 /// use lf_slots::{define_inline_slots, SlotPool};
 ///
+/// // a pool with a capacity of 1 and automatically determined number of words per shard
 /// define_inline_slots!(pub(crate) SlotPool1, 1);
 ///
 /// let pool: SlotPool1 = SlotPool1::new();
 /// assert!(pool.pull().is_some());
+///
+/// // a pool with one word per shard and 128 slots.
+/// define_inline_slots!(SlotPool128_1, 128, 1);
+///
+/// let pool: SlotPool128_1 = SlotPool128_1::new();
+/// assert!(pool.pull().is_some())
+///
 /// ```
 #[macro_export]
 macro_rules! define_inline_slots {
     ($vis:vis $name:ident, $n:expr) => {
-        $vis type $name = $crate::InlineSlots<$n, { $crate::core::shard_count($n) }, { $crate::core::words_per_shard($n) }>;
+        $crate::define_inline_slots!($vis $name, $n, { $crate::core::words_per_shard($n) });
+    };
+    ($vis:vis $name:ident, $n:expr, $w:expr) => {
+        $vis type $name = $crate::InlineSlots<$n, { $crate::core::shard_count($n, $w) }, $w>;
     };
 }
 
@@ -158,19 +169,29 @@ macro_rules! define_inline_slots {
 /// ```rust
 /// use lf_slots::{define_inline_wordslots, SlotPool};
 ///
+/// // a pool with a capacity of 1 and automatically determined number of words per shard
 /// define_inline_wordslots!(pub(crate) SlotPool1, 1);
 ///
 /// let pool: SlotPool1 = SlotPool1::new();
 /// assert!(pool.pull().is_some());
+///
+/// // A word pool with one word per shard and a capacity of 2.
+/// define_inline_wordslots!(SlotPool2_1, 2, 1);
+///
+/// let pool: SlotPool2_1 = SlotPool2_1::new();
+/// assert!(pool.pull().is_som());
 /// ```
 #[macro_export]
 macro_rules! define_inline_wordslots {
     ($vis:vis $name:ident, $n:expr) => {
+        $crate::define_inline_wordslots!($vis $name, $n, { $crate::core::words_per_shard($n * $crate::core::Word::BITS as usize) });
+    };
+    ($vis:vis $name:ident, $n:expr, $w:expr) => {
         $vis type $name = $crate::batched::WordPool<
             $crate::InlineSlots<
                 { $n * $crate::core::Word::BITS as usize },
-                { $crate::core::shard_count($n * $crate::core::Word::BITS as usize) },
-                { $crate::core::words_per_shard($n * $crate::core::Word::BITS as usize) }
+                { $crate::core::shard_count($n * $crate::core::Word::BITS as usize, $w) },
+                $w
             >
         >;
     };

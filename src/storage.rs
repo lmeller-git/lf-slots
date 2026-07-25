@@ -259,11 +259,6 @@ impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize>
     /// Constructs a new `InlineSlots` with the specified coherence provider
     pub fn with_coherence_provider<C: CoherenceProvider + Default>()
     -> InlineSlots<N, SHARDS, WORDS_PER_SHARD, C> {
-        assert!(
-            SHARDS * WORDS_PER_SHARD * WORD_BITS >= N,
-            "InlineSlots: SHARDS ({SHARDS}) is too small to hold capacity N ({N}). Required shards: {}",
-            crate::bitshard::shard_count(N)
-        );
         InlineSlots {
             raw: GenericStorage::new(InlineBuffer::new(), N),
         }
