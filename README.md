@@ -42,7 +42,7 @@ assert!(pool.put(handle).is_ok());
 assert!(pool.is_full());
 ```
 
-`lf_slots::HeapSlots`:
+`lf_slots::Slots`:
 
 ```rust
 #[cfg(feature = "alloc")]

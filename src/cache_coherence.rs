@@ -3,7 +3,7 @@
 //!
 //! The default `CoherenceProvider` across this crate is [`AutoCoherenceProvider`], which chooses a `CoherenceProvider` based on feature flags.
 //!
-//! If no or very low thread contention is to be expected OR if the number of shards present in the slot pool are much smaller than the number of threads, [`NoCoherence should be used.
+//! If no or very low thread contention is to be expected OR if the number of shards present in the slot pool are much smaller than the number of threads, [`NoCoherence`] should be used.
 //!
 //! Note that it is strongly depended on workload and threading model which coherence model would improve performance and models that are good under some particular workload
 //! may reduce performance under another workload. Thus if performance is critical, the correct coherence implementation should be chosen based on benchmarks and performance profiling.
@@ -25,7 +25,7 @@ use crate::{
 pub trait CoherenceProvider {
     /// returns a discriminant used to inform the slot pool of the identiy of the callign thread.
     fn current_hint(&self) -> usize;
-    /// huhu
+    /// Advances the hnts internal state with some weight `count`. This does not necessarily correspond to an increase of `current_hint`
     fn advance_hint_by(&self, count: usize);
 }
 
@@ -135,13 +135,13 @@ impl<const STRIPES: usize, const STEP: usize> CoherenceProvider
 {
     #[inline]
     fn current_hint(&self) -> usize {
-        //TODO: get core id
+        //TODO: get core id to reduce false hint sharing due to hash collision
         let id = self.current_stripe_idx();
         self.stripes[id].0.load(Ordering::Relaxed)
     }
 
     fn advance_hint_by(&self, count: usize) {
-        // TODO get core id
+        //TODO: get core id to reduce false hint sharing due to hash collision
         let id = self.current_stripe_idx();
         let mut counter = self.stripes[id].1.load(Ordering::Relaxed);
 

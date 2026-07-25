@@ -818,7 +818,6 @@ mod small_capacity {
 #[cfg(feature = "alloc")]
 mod api_tier_cost {
     use criterion::{Criterion, Throughput};
-    use crossbeam_queue::ArrayQueue;
     use lf_slots::{SlotPool, core::RawSlotPool, define_inline_slots, define_inline_wordslots};
 
     use crate::common::{ArrayQueuePool, IndexPool};
@@ -886,7 +885,7 @@ mod api_tier_cost {
                 for _ in 0..ITERS {
                     let mut handles = Vec::with_capacity(CAP);
                     for _ in 0..CAP {
-                        if let Some(h) = pool.pull() {
+                        if let Some(h) = pool.pull_() {
                             handles.push(h);
                         }
                     }

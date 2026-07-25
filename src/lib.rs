@@ -30,7 +30,7 @@
 //! assert!(pool.is_full());
 //! ```
 //!
-//! `lf_slots::HeapSlots`:
+//! `lf_slots::Slots`:
 //!
 //! ```rust
 //! #[cfg(feature = "alloc")]
@@ -157,7 +157,7 @@ macro_rules! define_inline_slots {
         $crate::define_inline_slots!($vis $name, $n, { $crate::core::words_per_shard($n) });
     };
     ($vis:vis $name:ident, $n:expr, $w:expr) => {
-        $vis type $name = $crate::InlineSlots<$n, { $crate::core::shard_count($n, $w) }, $w>;
+        $vis type $name<C = $crate::cache_coherence::AutoCoherenceProvider> = $crate::InlineSlots<$n, { $crate::core::shard_count($n, $w) }, $w, C>;
     };
 }
 
@@ -179,7 +179,7 @@ macro_rules! define_inline_slots {
 /// define_inline_wordslots!(SlotPool2_1, 2, 1);
 ///
 /// let pool: SlotPool2_1 = SlotPool2_1::new();
-/// assert!(pool.pull().is_som());
+/// assert!(pool.pull().is_some());
 /// ```
 #[macro_export]
 macro_rules! define_inline_wordslots {
@@ -187,11 +187,12 @@ macro_rules! define_inline_wordslots {
         $crate::define_inline_wordslots!($vis $name, $n, { $crate::core::words_per_shard($n * $crate::core::Word::BITS as usize) });
     };
     ($vis:vis $name:ident, $n:expr, $w:expr) => {
-        $vis type $name = $crate::batched::WordPool<
+        $vis type $name<C = $crate::cache_coherence::AutoCoherenceProvider> = $crate::batched::WordPool<
             $crate::InlineSlots<
                 { $n * $crate::core::Word::BITS as usize },
                 { $crate::core::shard_count($n * $crate::core::Word::BITS as usize, $w) },
-                $w
+                $w,
+                C
             >
         >;
     };
