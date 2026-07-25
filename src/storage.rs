@@ -236,7 +236,7 @@ impl<T, const N: usize> Buffer for InlineBuffer<T, N> {
     }
 }
 
-/// A statically sized slot storage stored on the stack.
+/// A statically sized slot storage.
 ///
 /// The storage has a capacity of `N`, distributed over `SHARDS` shards of size _bits in a cacheline_
 pub struct InlineSlots<
@@ -374,7 +374,7 @@ impl<T> Buffer for HeapBuf<T> {
     }
 }
 
-/// A statically sized index storage stored on the heap.
+/// A dynamically sized, allocated index storage.
 #[cfg(feature = "alloc")]
 pub struct Slots<C = AutoCoherenceProvider> {
     raw: GenericStorage<HeapBuf<BitsetStorage>, C>,
@@ -477,7 +477,7 @@ pub mod batched {
     }
 
     impl<P> WordPool<P> {
-        /// huhu
+        /// Creates a new WordPool instance over slot pool P
         pub(crate) fn new_in(inner: P) -> Self {
             Self { inner }
         }

@@ -16,8 +16,8 @@ All storage types in this crate are safe to use in a concurrent context, strictl
 
 ### Storage Types
 
-- [`InlineSlots`](https://docs.rs/lf-slots/latest/lf_slots/storage/struct.InlineSlots.html): statically sized, stack-allocated storage.
-- [`Slots`](https://docs.rs/lf-slots/latest/lf_slots/storage/struct.Slots.html): statically sized, heap-allocated storage.
+- [`InlineSlots`](https://docs.rs/lf-slots/latest/lf_slots/storage/struct.InlineSlots.html): statically sized storage.
+- [`Slots`](https://docs.rs/lf-slots/latest/lf_slots/storage/struct.Slots.html): dynamically sized allocated storage.
 
 Due to limitations with current `const` expression resolution, [`InlineSlots`](https://docs.rs/lf-slots/latest/lf_slots/storage/struct.InlineSlots.html) should be declared with [`define_inline_slots!`](https://docs.rs/lf-slots/latest/lf_slots/macro.define_inline_slots.html) in order to have the correct size and layout.
 

@@ -4,8 +4,8 @@
 //!
 //! ## Storage Types
 //!
-//! - [`InlineSlots`]: statically sized, stack-allocated storage.
-//! - [`Slots`]: statically sized, heap-allocated storage.
+//! - [`InlineSlots`]: statically sized storage.
+//! - [`Slots`]: dynamically sized allocated storage.
 //!
 //! Due to limitations with current `const` expression resolution, [`InlineSlots`] should be declared with [`define_inline_slots!`] in order to have the correct size and layout.
 //!
