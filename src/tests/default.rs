@@ -217,6 +217,7 @@ mod heap {
     }
 }
 
+#[cfg(feature = "word-slots")]
 mod word_slots {
     use super::*;
     use crate::define_inline_wordslots;
