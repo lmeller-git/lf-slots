@@ -75,6 +75,7 @@
 //!
 //! - `std`: Enables `std` and `alloc` support.
 //! - `alloc`: Enables `alloc` support, allowing usage of dynamically allocated slot pools.
+//! - `word-slots`: Enables `WordSlots` and `InlineWordSlots`, which may be more performant at low capacity.
 //! - `atomic-fallback`: Uses the `portable-atomic` fallback feature if native atomics are missing. It is discouraged to use this feature when performance matters, as fallback atomics internally rely on locks.
 //! - `default`: None
 //!
