@@ -6,7 +6,7 @@
 //! If no or very low thread contention is to be expected OR if the number of shards present in the slot pool are much smaller than the number of threads, [`NoCoherence`] should be used.
 //!
 //! Note that it is strongly depended on workload and threading model which coherence model would improve performance and models that are good under some particular workload
-//! may reduce performance under another workload. Thus if performance is critical, the correct coherence implementation should be chosen based on benchmarks and performance profiling.
+//! may reduce performance under another workload. Thus, if performance is important, the correct coherence implementation should be chosen based on benchmarks and performance profiling.
 //! In many cases a specialized implementation may also yield better results than the general implementations provided by this crate.
 
 #[cfg(feature = "std")]
