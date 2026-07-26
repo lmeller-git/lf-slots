@@ -674,7 +674,7 @@ mod concurrent {
 // consumer split). Extended with a third arm testing spec item (c):
 // WordSlots at matched logical capacity.
 // =========================================================================
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", feature = "word-slots"))]
 mod small_capacity {
     use std::{sync::Arc, thread};
 
@@ -816,7 +816,7 @@ mod small_capacity {
 // storage) from storage-implementation delta (generic bitset vs. purpose-built
 // WordSlots).
 // =========================================================================
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", feature = "word-slots"))]
 mod api_tier_cost {
     use criterion::{Criterion, Throughput};
     use lf_slots::{
@@ -907,13 +907,13 @@ mod api_tier_cost {
 // =========================================================================
 // Wiring
 // =========================================================================
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", feature = "word-slots"))]
 use api_tier_cost::bench_word_granularity;
 #[cfg(feature = "alloc")]
 use concurrent::{bench_mpmc, bench_mpsc, bench_spsc};
 #[cfg(feature = "alloc")]
 use single_thread::bench_single_thread;
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", feature = "word-slots"))]
 use small_capacity::bench_small_capacity_strategies;
 
 #[cfg(feature = "alloc")]
@@ -922,13 +922,16 @@ criterion_group!(single_thread_benches, bench_single_thread);
 #[cfg(feature = "alloc")]
 criterion_group!(concurrent_benches, bench_spsc, bench_mpsc, bench_mpmc);
 
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", feature = "word-slots"))]
 criterion_group!(small_capacity_benches, bench_small_capacity_strategies);
 
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", feature = "word-slots"))]
 criterion_group!(api_tier_benches, bench_word_granularity);
 
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", not(feature = "word-slots")))]
+criterion_main!(single_thread_benches, concurrent_benches,);
+
+#[cfg(all(feature = "alloc", feature = "word-slots"))]
 criterion_main!(
     single_thread_benches,
     concurrent_benches,

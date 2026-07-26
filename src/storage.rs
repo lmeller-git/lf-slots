@@ -5,9 +5,8 @@ use crate::{
     SlotPoolMeta,
     bitshard::{BitsetStorage, ShardStorage, WORDS_PER_CACHE_LINE},
     cache_coherence::{AutoCoherenceProvider, CoherenceProvider},
-    core::{ID, RawBatch, RawSlotPool, Word},
-    core_internal::WORD_BITS,
-    slot_alloc::{BatchedRawSlotPool, BatchedSlotPool},
+    core_internal::{ID, RawBatch, WORD_BITS, Word},
+    slot_alloc::{BatchedRawSlotPool, BatchedSlotPool, RawSlotPool},
     sync::atomic::Ordering,
 };
 
@@ -32,10 +31,16 @@ where
     B::Slot: ShardStorage,
 {
     pub(crate) fn new(buffer: B, capacity: usize) -> Self {
-        assert!(
+        debug_assert!(
             buffer.capacity() > 0,
             "The SlotPool should have a capacity greater 0"
         );
+        debug_assert_eq!(
+            buffer.capacity(),
+            capacity.div_ceil(<B::Slot as ShardStorage>::SHARD_BITS),
+            "The SlotPool should have the correct number of shards"
+        );
+
         let total_bits = buffer.capacity() * <B::Slot as ShardStorage>::SHARD_BITS;
         let dead_slots = total_bits - capacity;
 
@@ -199,7 +204,7 @@ where
     C: CoherenceProvider,
 {
     fn id(&self) -> ID {
-        self.id.clone()
+        self.id
     }
 }
 
@@ -553,8 +558,8 @@ pub mod batched {
         }
     }
 
-    impl<const WORD_CAPACITY: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize>
-        WordPool<InlineSlots<WORD_CAPACITY, SHARDS, WORDS_PER_SHARD, AutoCoherenceProvider>>
+    impl<const BIT_CAPACITY: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize>
+        WordPool<InlineSlots<BIT_CAPACITY, SHARDS, WORDS_PER_SHARD, AutoCoherenceProvider>>
     {
         /// Constructs a new Inlined Word Pool
         pub fn new() -> Self {
@@ -563,13 +568,13 @@ pub mod batched {
 
         /// Constructs a new `Slots` instance with specified coherence provider.
         pub fn with_coherence_provider<C: CoherenceProvider + Default>()
-        -> WordPool<InlineSlots<WORD_CAPACITY, SHARDS, WORDS_PER_SHARD, C>> {
+        -> WordPool<InlineSlots<BIT_CAPACITY, SHARDS, WORDS_PER_SHARD, C>> {
             WordPool::new_in(InlineSlots::with_coherence_provider())
         }
     }
 
-    impl<const WORD_CAPACITY: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize> Default
-        for WordPool<InlineSlots<WORD_CAPACITY, SHARDS, WORDS_PER_SHARD, AutoCoherenceProvider>>
+    impl<const BIT_CAPACITY: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize> Default
+        for WordPool<InlineSlots<BIT_CAPACITY, SHARDS, WORDS_PER_SHARD, AutoCoherenceProvider>>
     {
         fn default() -> Self {
             Self::new()

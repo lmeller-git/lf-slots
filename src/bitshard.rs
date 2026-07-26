@@ -119,21 +119,13 @@ impl<const WORDS: usize> BatchedRawSlotPool for BitsetStorage<WORDS> {
     unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
         // SAFETY:
         // The caller promises that this batch is valid
-        _ = unsafe { self.words.get_unchecked(batch.starting_idx / WORD_BITS) }
+        let old = unsafe { self.words.get_unchecked(batch.starting_idx / WORD_BITS) }
             .fetch_or(batch.mask, Ordering::Release);
-        true
+        batch.mask & old == 0
     }
 }
 
 impl<const WORDS: usize> SlotPoolMeta for BitsetStorage<WORDS> {
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    fn is_full(&self) -> bool {
-        self.len() == Self::SHARD_BITS
-    }
-
     fn len(&self) -> usize {
         self.free_count()
     }
@@ -166,11 +158,9 @@ pub const fn words_per_shard(capacity: usize) -> usize {
     let ideal_words = ideal_bits_per_shard.div_ceil(WORD_BITS);
     let words_p2 = ideal_words.next_power_of_two();
 
-    // TODO use clamp once Ord is const
+    // TODO use min once Ord is const
     if words_p2 > WORDS_PER_CACHE_LINE {
         WORDS_PER_CACHE_LINE
-    } else if words_p2 < 1 {
-        1
     } else {
         words_p2
     }

@@ -20,7 +20,7 @@ pub(crate) const WORD_BYTES: usize = core::mem::size_of::<Word>();
 pub(crate) const WORD_BITS: usize = Word::BITS as usize;
 
 /// The ID associated with a `SlotPool` and the slots handed out by it.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct ID {
     repr: Word,
 }
@@ -35,10 +35,6 @@ impl ID {
         Self {
             repr: ID.fetch_add(1, portable_atomic::Ordering::Relaxed),
         }
-    }
-
-    pub(crate) fn clone(&self) -> Self {
-        Self { repr: self.repr }
     }
 }
 
@@ -101,7 +97,7 @@ impl RawBatch {
     /// Splits the batch into two batches of sizes `n`, `self.count() - n`.
     /// If `n` >= `self.count()`, returns `(self, None)`.
     ///
-    /// Splits into (high bits, low bits).
+    /// Splits into (low bits, high bits).
     pub fn split_at(self, n: usize) -> (Self, Option<Self>) {
         let total = self.count();
         if n >= total {
@@ -205,13 +201,13 @@ impl Batch {
     /// Splits the batch into two batches of sizes `n`, `self.count() - n`.
     /// If `n` >= `self.count()`, returns `(self, None)`.
     ///
-    /// Splits into (high bits, low bits).
+    /// Splits into (low bits, high bits).
     pub fn split_at(self, n: usize) -> (Self, Option<Self>) {
         let (r1, r2) = self.raw.split_at(n);
         (
             Batch {
                 raw: r1,
-                id: self.id.clone(),
+                id: self.id,
             },
             r2.map(|raw| Batch { raw, id: self.id }),
         )
@@ -247,7 +243,7 @@ impl Iterator for BatchIter {
         // RawBatchIter::next takes ownership of a slot index.
         // ID stays the same.
         // The slot is not leaked.
-        Some(SlotHandle::new(index, self.id.clone()))
+        Some(SlotHandle::new(index, self.id))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

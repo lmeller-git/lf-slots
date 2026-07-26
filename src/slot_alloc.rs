@@ -1,7 +1,4 @@
-use crate::{
-    core::ID,
-    core_internal::{Batch, RawBatch, SlotHandle},
-};
+use crate::core_internal::{Batch, ID, RawBatch, SlotHandle};
 
 /// Metadata of a Storage
 pub trait SlotPoolMeta {
@@ -81,6 +78,7 @@ pub trait RawSlotPool: SlotPoolMeta {
 /// A RawSlotPool that supports batched operations
 pub trait BatchedRawSlotPool: RawSlotPool {
     /// Pulls a `RawBatch` from the storage if it is not empty.
+    /// the pulled batch is non-empty.
     fn pull_raw_batch(&self) -> Option<RawBatch>;
     /// Puts back a `RawBatch` into the storage and frees the associated slots.
     ///
@@ -93,16 +91,15 @@ pub trait BatchedRawSlotPool: RawSlotPool {
     /// `batch` is a `RawBatch` reutrned by `pull_raw_batch`
     unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool;
 
-    /// Pulls a batch of exactly `N` SlotHandles from the storage, if it contains enough slots.
+    /// Pulls a batch of exactly `N` slots from the storage, if it contains enough slots.
     fn pull_raw_exact<const N: usize>(&self) -> Option<[usize; N]> {
         if N > self.len() {
             return None;
         }
         let mut batch = core::array::from_fn(|_| core::mem::MaybeUninit::uninit());
         let mut total_count = 0;
-        while let Some(pulled_batch) = self.pull_raw_batch()
-            && pulled_batch.count() > 0
-        {
+        while let Some(pulled_batch) = self.pull_raw_batch() {
+            debug_assert!(pulled_batch.count() > 0);
             let count = pulled_batch.count();
             if count + total_count >= N {
                 let (l, r) = pulled_batch.split_at(N - total_count);
@@ -154,6 +151,7 @@ pub trait BatchedRawSlotPool: RawSlotPool {
 /// A SlotPool that supportes batched operations
 pub trait BatchedSlotPool: BatchedRawSlotPool + SlotPool {
     /// Pull a `Batch` from the storage if it is not empty.
+    /// The pulled batch is non-empty.
     fn pull_batch(&self) -> Option<Batch> {
         BatchedRawSlotPool::pull_raw_batch(self).map(|raw| Batch::new(self.id(), raw))
     }
@@ -179,6 +177,6 @@ pub trait BatchedSlotPool: BatchedRawSlotPool + SlotPool {
     fn pull_exact<const N: usize>(&self) -> Option<[SlotHandle; N]> {
         let batch = BatchedRawSlotPool::pull_raw_exact(self);
         let id = self.id();
-        batch.map(|arr| arr.map(|slot| SlotHandle::new(slot, id.clone())))
+        batch.map(|arr| arr.map(|slot| SlotHandle::new(slot, id)))
     }
 }

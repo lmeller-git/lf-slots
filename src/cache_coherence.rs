@@ -120,7 +120,7 @@ impl<const STRIPES: usize, const STEP: usize> StripedRoundRobin<STRIPES, STEP> {
         let stack_ptr = &dummy as *const u8 as usize;
 
         let hash = stack_ptr.wrapping_mul(PHI);
-        (hash >> 60) % STRIPES
+        (hash >> (usize::BITS - 4)) % STRIPES
     }
 }
 

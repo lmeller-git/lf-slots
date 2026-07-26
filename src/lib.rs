@@ -75,7 +75,7 @@
 //!
 //! - `std`: Enables `std` and `alloc` support.
 //! - `alloc`: Enables `alloc` support, allowing usage of dynamically allocated slot pools.
-//! - `word-slots`: Enables `WordSlots` and `InlineWordSlots`, which may be more performant at low capacity.
+//! - `word-slots`: Enables `WordSlots` and `InlineWordSlots` (via [`define_inline_wordslots`]), which can be more performant at low capacity.
 //! - `atomic-fallback`: Uses the `portable-atomic` fallback feature if native atomics are missing. It is discouraged to use this feature when performance matters, as fallback atomics internally rely on locks.
 //! - `default`: None
 //!
@@ -109,7 +109,7 @@ mod slot_alloc;
 mod storage;
 mod sync;
 
-pub use core_internal::{Batch, BatchIter, SlotHandle};
+pub use core_internal::{Batch, BatchIter, ID, SlotHandle};
 pub use slot_alloc::{BatchedSlotPool, SlotPool, SlotPoolMeta};
 #[cfg(feature = "word-slots")]
 pub use storage::batched;
@@ -124,14 +124,14 @@ pub mod core {
     //! Core functionality for the `lf-slots` crate
     pub use crate::{
         bitshard::{WORDS_PER_CACHE_LINE, shard_count, words_per_shard},
-        core_internal::{ID, RawBatch, RawBatchIter, Word},
+        core_internal::{RawBatch, RawBatchIter, Word},
         slot_alloc::{BatchedRawSlotPool, RawSlotPool},
     };
 }
 
 pub mod prelude {
     //! reexports common traits implemeneted by `lf-slot` types.
-    pub use crate::{SlotPool, SlotPoolMeta};
+    pub use crate::{BatchedSlotPool, SlotPool, SlotPoolMeta};
 }
 
 /// Define a type alias for an `InlineSlots<N, { shards(N) }, { words_per_shard(N) }>`.
