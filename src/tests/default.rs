@@ -1,8 +1,9 @@
 use crate::{
+    BatchedSlotPool,
     SlotPool,
     SlotPoolMeta,
     cache_coherence::NoCoherence,
-    core::RawSlotPool,
+    core::{BatchedRawSlotPool, RawSlotPool},
     define_inline_slots,
     tests::stubs::{
         batch_mpmc,
@@ -332,7 +333,7 @@ mod batch_tests {
     use super::*;
     use crate::{SlotPoolMeta, Slots};
 
-    fn create_test_pool() -> impl SlotPool {
+    fn create_test_pool() -> impl BatchedSlotPool {
         Slots::new(2048)
     }
 

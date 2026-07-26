@@ -7,6 +7,7 @@ use crate::{
     cache_coherence::{AutoCoherenceProvider, CoherenceProvider},
     core::{ID, RawBatch, RawSlotPool, Word},
     core_internal::WORD_BITS,
+    slot_alloc::{BatchedRawSlotPool, BatchedSlotPool},
     sync::atomic::Ordering,
 };
 
@@ -126,7 +127,14 @@ where
         // given that index is valid
         unsafe { slot.put_raw(col) }
     }
+}
 
+impl<B, C> BatchedRawSlotPool for GenericStorage<B, C>
+where
+    B: Buffer,
+    B::Slot: ShardStorage + BatchedRawSlotPool,
+    C: CoherenceProvider,
+{
     fn pull_raw_batch(&self) -> Option<RawBatch> {
         let inner = self.buffer.inner();
         let cap = self.buffer.capacity();
@@ -174,6 +182,14 @@ where
             })
         }
     }
+}
+
+impl<B, C> BatchedSlotPool for GenericStorage<B, C>
+where
+    B: Buffer,
+    B::Slot: ShardStorage + BatchedRawSlotPool,
+    C: CoherenceProvider,
+{
 }
 
 impl<B, C> SlotPool for GenericStorage<B, C>
@@ -305,7 +321,11 @@ impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C: Coher
         // index was returned by self.pull_raw
         unsafe { self.raw.put_raw(index) }
     }
+}
 
+impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C: CoherenceProvider>
+    BatchedRawSlotPool for InlineSlots<N, SHARDS, WORDS_PER_SHARD, C>
+{
     fn pull_raw_batch(&self) -> Option<RawBatch> {
         self.raw.pull_raw_batch()
     }
@@ -331,7 +351,11 @@ impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C: Coher
     fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
         self.raw.put(index)
     }
+}
 
+impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C: CoherenceProvider>
+    BatchedSlotPool for InlineSlots<N, SHARDS, WORDS_PER_SHARD, C>
+{
     fn pull_batch(&self) -> Option<Batch> {
         self.raw.pull_batch()
     }
@@ -423,7 +447,10 @@ impl<C: CoherenceProvider> RawSlotPool for Slots<C> {
         // index was returned by self.pull_raw
         unsafe { self.raw.put_raw(index) }
     }
+}
 
+#[cfg(feature = "alloc")]
+impl<C: CoherenceProvider> BatchedRawSlotPool for Slots<C> {
     fn pull_raw_batch(&self) -> Option<RawBatch> {
         self.raw.pull_raw_batch()
     }
@@ -448,7 +475,10 @@ impl<C: CoherenceProvider> SlotPool for Slots<C> {
     fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
         self.raw.put(index)
     }
+}
 
+#[cfg(feature = "alloc")]
+impl<C: CoherenceProvider> BatchedSlotPool for Slots<C> {
     fn pull_batch(&self) -> Option<Batch> {
         self.raw.pull_batch()
     }
@@ -458,6 +488,7 @@ impl<C: CoherenceProvider> SlotPool for Slots<C> {
     }
 }
 
+#[cfg(feature = "word-slots")]
 #[doc(hidden)]
 pub mod batched {
     use super::*;
@@ -496,19 +527,15 @@ pub mod batched {
         }
     }
 
-    impl<P: RawSlotPool> RawSlotPool for WordPool<P> {
-        fn pull_raw_batch(&self) -> Option<RawBatch> {
+    impl<P: BatchedRawSlotPool> RawSlotPool for WordPool<P> {
+        fn pull_raw(&self) -> Option<usize> {
             let inner_batch = self.inner.pull_raw_batch()?;
             let word_idx = inner_batch.starting_idx / WORD_BITS;
-
-            Some(RawBatch {
-                starting_idx: word_idx,
-                mask: 1,
-            })
+            Some(word_idx)
         }
 
-        unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
-            let bit_idx = batch.starting_idx * WORD_BITS;
+        unsafe fn put_raw(&self, index: usize) -> bool {
+            let bit_idx = index * WORD_BITS;
 
             let full_word_batch = RawBatch {
                 starting_idx: bit_idx,
@@ -518,23 +545,9 @@ pub mod batched {
             // SAFETY: Caller guarantees batch validity
             unsafe { self.inner.put_raw_batch(full_word_batch) }
         }
-
-        fn pull_raw(&self) -> Option<usize> {
-            self.pull_raw_batch().map(|b| b.starting_idx)
-        }
-
-        unsafe fn put_raw(&self, index: usize) -> bool {
-            // SAFETY: Caller guarantees index validity
-            unsafe {
-                self.put_raw_batch(RawBatch {
-                    starting_idx: index,
-                    mask: Word::MAX,
-                })
-            }
-        }
     }
 
-    impl<P: SlotPool> SlotPool for WordPool<P> {
+    impl<P: BatchedSlotPool> SlotPool for WordPool<P> {
         fn id(&self) -> ID {
             self.inner.id()
         }

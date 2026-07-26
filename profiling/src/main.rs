@@ -4,7 +4,7 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 use std::{env, sync::Arc, thread, time::Instant};
 
-use lf_slots::{SlotPool, Slots, core::Word};
+use lf_slots::{BatchedSlotPool, SlotPool, Slots, core::Word};
 
 const CAPACITY: usize = 2048;
 const TOTAL_OPS: usize = 500_000_000;

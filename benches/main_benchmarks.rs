@@ -24,10 +24,11 @@ mod common {
     use crossbeam_queue::ArrayQueue;
     use crossbeam_utils::CachePadded;
     use lf_slots::{
+        BatchedSlotPool,
         SlotPool,
         Slots,
         cache_coherence::CoherenceProvider,
-        core::{RawBatch, RawSlotPool, Word},
+        core::{BatchedRawSlotPool, RawBatch, RawSlotPool, Word},
     };
 
     pub(crate) const CAPACITY: usize = 4096;
@@ -68,7 +69,7 @@ mod common {
     /// atomic op claims/releases up to `Word::BITS` slots at once.
     /// `ArrayQueuePool` has no equivalent concept, so it only implements
     /// plain `IndexPool`.
-    pub(crate) trait RawBatchPool: IndexPool {
+    pub(crate) trait RawBatchPool_: IndexPool {
         fn pull_raw_batch_(&self) -> Option<RawBatch>;
         fn put_raw_batch_(&self, batch: RawBatch);
     }
@@ -86,7 +87,7 @@ mod common {
 
         #[inline]
         fn pull_exact_(&self) -> Option<ExactBatch> {
-            SlotPool::pull_exact::<BATCH_SIZE>(self)
+            BatchedSlotPool::pull_exact::<BATCH_SIZE>(self)
                 .map(|handles| handles.map(|handle| handle.as_usize()))
         }
 
@@ -98,7 +99,7 @@ mod common {
         }
     }
 
-    impl<C: CoherenceProvider + Send + Sync + 'static> RawBatchPool for Slots<C> {
+    impl<C: CoherenceProvider + Send + Sync + 'static> RawBatchPool_ for Slots<C> {
         #[inline]
         fn pull_raw_batch_(&self) -> Option<RawBatch> {
             self.pull_raw_batch()
@@ -199,7 +200,7 @@ mod common {
         pool.put_exact_(batch);
     }
 
-    pub(crate) fn raw_acquire<P: RawBatchPool>(pool: &P) -> RawBatch {
+    pub(crate) fn raw_acquire<P: RawBatchPool_>(pool: &P) -> RawBatch {
         loop {
             if let Some(batch) = pool.pull_raw_batch_() {
                 return batch;
@@ -208,7 +209,7 @@ mod common {
         }
     }
 
-    pub(crate) fn raw_release<P: RawBatchPool>(pool: &P, batch: RawBatch) {
+    pub(crate) fn raw_release<P: RawBatchPool_>(pool: &P, batch: RawBatch) {
         pool.put_raw_batch_(batch);
     }
 
@@ -281,7 +282,7 @@ mod common {
 #[cfg(feature = "alloc")]
 mod single_thread {
     use criterion::{Criterion, Throughput};
-    use lf_slots::{SlotPool, Slots, core::RawSlotPool};
+    use lf_slots::{SlotPool, Slots, core::BatchedRawSlotPool};
 
     use crate::common::{
         ArrayQueuePool,
@@ -818,7 +819,12 @@ mod small_capacity {
 #[cfg(feature = "alloc")]
 mod api_tier_cost {
     use criterion::{Criterion, Throughput};
-    use lf_slots::{SlotPool, core::RawSlotPool, define_inline_slots, define_inline_wordslots};
+    use lf_slots::{
+        SlotPool,
+        core::BatchedRawSlotPool,
+        define_inline_slots,
+        define_inline_wordslots,
+    };
 
     use crate::common::{ArrayQueuePool, IndexPool};
 

@@ -38,6 +38,7 @@ default = []
 std = ["alloc", "dep:thread_local"]
 alloc = []
 atomic-fallback = ["portable-atomic/fallback"]
+word-slots = []
 
 [dependencies]
 crossbeam-utils = { version = "0.8.21", default-features = false }
@@ -68,6 +69,9 @@ harness = false
 inherits = "release"
 debug = true
 lto = "thin"
+
+[workspace.metadata.docs.rs]
+all-features = true
 
 [workspace.lints.rust]
 unknown-lints = "allow"

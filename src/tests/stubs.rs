@@ -3,6 +3,7 @@
 use alloc::{collections::VecDeque, vec::Vec};
 
 use crate::{
+    BatchedSlotPool,
     SlotPool,
     sync::{
         Arc,
@@ -292,7 +293,7 @@ where
 
 pub(crate) fn batch_smoke<S>(storage: S)
 where
-    S: SlotPool,
+    S: BatchedSlotPool,
 {
     let cap = storage.capacity();
     assert!(storage.is_full());
@@ -344,7 +345,7 @@ where
 
 pub(crate) fn batch_spsc<S>(storage: S)
 where
-    S: SlotPool + Send + Sync + 'static,
+    S: BatchedSlotPool + Send + Sync + 'static,
 {
     use crate::Batch;
 
@@ -384,7 +385,7 @@ where
 
 pub(crate) fn batch_mpmc<S>(storage: S)
 where
-    S: SlotPool + Send + Sync + 'static,
+    S: BatchedSlotPool + Send + Sync + 'static,
 {
     let capacity = storage.capacity();
     let storage = Arc::new(storage);
@@ -456,7 +457,7 @@ where
 /// - Exact array pulls (`pull_exact::<2>`)
 pub(crate) fn mixed_mpmc<S>(storage: S)
 where
-    S: SlotPool + Send + Sync + 'static,
+    S: BatchedSlotPool + Send + Sync + 'static,
 {
     let capacity = storage.capacity();
     let storage = Arc::new(storage);

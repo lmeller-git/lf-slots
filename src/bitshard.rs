@@ -6,6 +6,7 @@ use crate::{
     SlotPoolMeta,
     core::{RawBatch, RawSlotPool},
     core_internal::{AtomicWord, WORD_BITS, Word},
+    slot_alloc::BatchedRawSlotPool,
     sync::atomic::Ordering,
 };
 
@@ -92,7 +93,9 @@ impl<const WORDS: usize> RawSlotPool for BitsetStorage<WORDS> {
         let prev = unsafe { self.words.get_unchecked(word_idx) }.fetch_or(mask, Ordering::Release);
         prev & mask == 0
     }
+}
 
+impl<const WORDS: usize> BatchedRawSlotPool for BitsetStorage<WORDS> {
     fn pull_raw_batch(&self) -> Option<RawBatch> {
         for (word_idx, word) in self.words.iter().enumerate() {
             let mut current = word.load(Ordering::Relaxed);

@@ -109,19 +109,22 @@ mod storage;
 mod sync;
 
 pub use core_internal::{Batch, BatchIter, SlotHandle};
-pub use slot_alloc::{SlotPool, SlotPoolMeta};
+pub use slot_alloc::{BatchedSlotPool, SlotPool, SlotPoolMeta};
+#[cfg(feature = "word-slots")]
 pub use storage::batched;
 
 pub use crate::storage::InlineSlots;
 #[cfg(feature = "alloc")]
-pub use crate::storage::{Slots, batched::WordSlots};
+pub use crate::storage::Slots;
+#[cfg(all(feature = "word-slots", feature = "alloc"))]
+pub use crate::storage::batched::WordSlots;
 
 pub mod core {
     //! Core functionality for the `lf-slots` crate
     pub use crate::{
         bitshard::{WORDS_PER_CACHE_LINE, shard_count, words_per_shard},
         core_internal::{ID, RawBatch, RawBatchIter, Word},
-        slot_alloc::RawSlotPool,
+        slot_alloc::{BatchedRawSlotPool, RawSlotPool},
     };
 }
 
@@ -181,6 +184,7 @@ macro_rules! define_inline_slots {
 /// let pool: SlotPool2_1 = SlotPool2_1::new();
 /// assert!(pool.pull().is_some());
 /// ```
+#[cfg(feature = "word-slots")]
 #[macro_export]
 macro_rules! define_inline_wordslots {
     ($vis:vis $name:ident, $n:expr) => {
