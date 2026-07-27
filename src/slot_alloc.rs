@@ -94,7 +94,7 @@ pub trait BatchedRawSlotPool: RawSlotPool {
     /// Pulls a batch of exactly `N` slots from the storage, if it contains enough slots.
     ///
     /// This method acquires slots eagerly, even if not enough slots may be aailable at the moment.
-    /// If the capacity of the pool is roughly equal to `N` or the likelihood of the pool not holding enough slots for pull_exact, then the length of the pool should be checked before hand.
+    /// If the capacity of the pool is roughly equal to `N` and the likelihood of the pool not holding enough slots for pull_exact, then the length of the pool should be checked before hand.
     /// ```ignore
     /// if pool.len() >= N {
     ///     pool.pull_raw_exact::<N>();
@@ -184,7 +184,7 @@ pub trait BatchedSlotPool: BatchedRawSlotPool + SlotPool {
     /// Pulls a batch of exactly `N` SlotHandles from the storage, if it contains enough slots.
     ///
     /// This method acquires slots eagerly, even if not enough slots may be aailable at the moment.
-    /// If the capacity of the pool is roughly equal to `N` or the likelihood of the pool not holding enough slots for pull_exact, then the length of the pool should be checked before hand.
+    /// If the capacity of the pool is roughly equal to `N` and the likelihood of the pool not holding enough slots for pull_exact, then the length of the pool should be checked before hand.
     /// ```ignore
     /// if pool.len() >= N {
     ///     pool.pull_exact::<N>();
