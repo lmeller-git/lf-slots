@@ -11,11 +11,13 @@ categories.workspace = true
 readme.workspace = true
 description.workspace = true
 rust-version.workspace = true
-exclude = [
-    ".github/*",
-    ".helix/*",
-    "justfile",
-    "rustfmt.toml",
+include = [
+    "src/**/*",
+    "benches/**/*",
+    "Cargo.toml",
+    "/LICENSE*",
+    "/README.md",
+    "/CHANGELOG.md",
 ]
 
 [package.metadata.docs.rs]
