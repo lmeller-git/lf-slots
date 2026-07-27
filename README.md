@@ -2,6 +2,8 @@
 ![CI Test](https://github.com/lmeller-git/lf-slots/actions/workflows/test.yml/badge.svg?branch=main)
 ![Safety Test](https://github.com/lmeller-git/lf-slots/actions/workflows/safety.yml/badge.svg?branch=main)
 ![no_std Test](https://github.com/lmeller-git/lf-slots/actions/workflows/nostd.yml/badge.svg?branch=main)
+[![Crates.io](https://img.shields.io/crates/v/lf-slots)](https://crates.io/crates/lf-slots)
+[![Docs.rs](https://docs.rs/lf-slots/badge.svg)](https://docs.rs/lf-slots)
 
 
 # lf-slots

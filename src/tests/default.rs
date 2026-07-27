@@ -19,6 +19,7 @@ use crate::{
         spsc,
     },
 };
+
 mod inline {
     use super::*;
 
@@ -64,6 +65,38 @@ mod inline {
         for i in 0..storage.capacity() {
             assert_eq!(i, storage.pull_raw().unwrap());
         }
+    }
+
+    #[test]
+    fn pull_exact() {
+        let storage = Storage10::new();
+
+        let batch5 = storage.pull_exact::<5>().unwrap();
+        assert_eq!(batch5.len(), 5);
+        assert_eq!(storage.len(), storage.capacity() - 5);
+        assert!(storage.pull_exact::<6>().is_none());
+        assert_eq!(storage.len(), storage.capacity() - 5);
+        let batch4 = storage.pull_exact::<4>().unwrap();
+        assert_eq!(batch4.len(), 4);
+        assert_eq!(storage.len(), 1);
+        let handle = storage.pull().unwrap();
+        assert!(storage.is_empty());
+
+        for h in batch4 {
+            storage.put(h).unwrap();
+        }
+
+        assert_eq!(storage.len(), 4);
+
+        for h in batch5 {
+            storage.put(h).unwrap();
+        }
+
+        storage.put(handle).unwrap();
+
+        assert!(storage.is_full());
+        assert!(storage.pull_exact::<42>().is_none());
+        assert!(storage.is_full());
     }
 
     #[test]
@@ -126,6 +159,7 @@ mod inline {
         mixed_mpmc(storage);
     }
 }
+
 #[cfg(feature = "alloc")]
 mod heap {
     use super::*;

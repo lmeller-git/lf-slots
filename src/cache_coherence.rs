@@ -1,7 +1,7 @@
 //! This module contains traits and types to alter the scheduling behaviour of `SlotPools`.
 //! `SlotPools` use [`CoherenceProvider`]s to reduce cache-line invalidation due to cross-thread contention.
 //!
-//! The default `CoherenceProvider` across this crate is [`AutoCoherenceProvider`], which chooses a `CoherenceProvider` based on feature flags.
+//! The default [`CoherenceProvider`] across this crate is [`AutoCoherenceProvider`], which chooses a [`CoherenceProvider`] based on feature flags.
 //!
 //! If no or very low thread contention is to be expected OR if the number of shards present in the slot pool are much smaller than the number of threads, [`NoCoherence`] should be used.
 //!
@@ -177,5 +177,73 @@ impl CoherenceProvider for AutoCoherenceProvider {
 
     fn advance_hint_by(&self, count: usize) {
         self.provider.advance_hint_by(count);
+    }
+}
+
+#[cfg(all(test, not(loom), not(shuttle), not(miri)))]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "std")]
+    fn stress_no_panic<P: CoherenceProvider + Sync>(provider: &P, threads: usize, iters: usize) {
+        std::thread::scope(|scope| {
+            for _ in 0..threads {
+                scope.spawn(|| {
+                    for i in 0..iters {
+                        let _ = provider.current_hint();
+                        provider.advance_hint_by(i % 7);
+                    }
+                });
+            }
+        });
+    }
+
+    #[test]
+    fn no_coherence_zero() {
+        let p = NoCoherence;
+        assert_eq!(p.current_hint(), 0);
+        p.advance_hint_by(usize::MAX);
+        assert_eq!(p.current_hint(), 0,);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn striped_round_robin_stress() {
+        stress_no_panic(
+            &StripedRoundRobin::<8, BITS_PER_CACHE_LINE>::new(),
+            8,
+            10_000,
+        );
+    }
+
+    #[test]
+    fn striped_round_robin_hint_advances() {
+        let p = StripedRoundRobin::<1, 1>::new();
+        for _ in 0..100 {
+            let before = p.current_hint();
+            p.advance_hint_by(1);
+            assert!(p.current_hint() > before);
+        }
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn thread_local_round_robin_survives_concurrent_use() {
+        stress_no_panic(
+            &ThreadLocalRoundRobin::<BITS_PER_CACHE_LINE>::new(),
+            8,
+            10_000,
+        );
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn thread_local_round_robin_hint_advances() {
+        let p = ThreadLocalRoundRobin::<1>::new();
+        for _ in 0..1000 {
+            let before = p.current_hint();
+            p.advance_hint_by(1);
+            assert!(p.current_hint() > before);
+        }
     }
 }

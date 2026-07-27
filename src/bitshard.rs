@@ -167,7 +167,81 @@ pub const fn words_per_shard(capacity: usize) -> usize {
 }
 
 /// Calculates the number of shards used to store `capacity` slots.
+/// The number of words per shard must be > 0.
 pub const fn shard_count(capacity: usize, words_per_shard: usize) -> usize {
+    debug_assert!(capacity > 0);
+    debug_assert!(words_per_shard > 0);
+
     let shard_bits = words_per_shard * WORD_BITS;
     capacity.div_ceil(shard_bits)
+}
+
+const _: () = assert!(words_per_shard(0) == 0);
+const _: () = assert!(shard_count(WORD_BITS, 1) == 1);
+
+#[cfg(all(test, not(loom), not(shuttle), not(miri)))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_line_fits() {
+        for capacity in [1, 2, WORD_BITS, WORD_BITS * 100, usize::MAX / 2, usize::MAX] {
+            assert!(words_per_shard(capacity) <= WORDS_PER_CACHE_LINE);
+        }
+    }
+
+    #[test]
+    fn power_two_words() {
+        for capacity in [
+            0,
+            1,
+            2,
+            3,
+            7,
+            WORD_BITS - 1,
+            WORD_BITS,
+            WORD_BITS + 1,
+            WORD_BITS * 1000,
+            usize::MAX,
+        ] {
+            let w = words_per_shard(capacity);
+            assert!(
+                w == 0 || w.is_power_of_two(),
+                "words_per_shard({capacity}) = {w} is not a power of two or zero"
+            );
+        }
+    }
+
+    #[test]
+    fn capacity_correct() {
+        for capacity in [
+            1,
+            2,
+            3,
+            4,
+            7,
+            8,
+            63,
+            64,
+            65,
+            127,
+            128,
+            1000,
+            1_000_000,
+            usize::MAX / 2,
+        ] {
+            let w = words_per_shard(capacity);
+            let shards = shard_count(capacity, w);
+            let provisioned = shards * w * WORD_BITS;
+            assert!(
+                provisioned >= capacity,
+                "capacity {capacity}: words_per_shard={w}, shard_count={shards} only provisions {provisioned} bits"
+            );
+        }
+    }
+
+    #[test]
+    fn max_words() {
+        assert_eq!(words_per_shard(usize::MAX), WORDS_PER_CACHE_LINE);
+    }
 }
