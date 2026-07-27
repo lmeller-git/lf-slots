@@ -11,6 +11,12 @@ categories.workspace = true
 readme.workspace = true
 description.workspace = true
 rust-version.workspace = true
+exclude = [
+    ".github/*",
+    ".helix/*",
+    "justfile",
+    "rustfmt.toml",
+]
 
 [package.metadata.docs.rs]
 all-features = true
