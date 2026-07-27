@@ -92,8 +92,16 @@ pub trait BatchedRawSlotPool: RawSlotPool {
     unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool;
 
     /// Pulls a batch of exactly `N` slots from the storage, if it contains enough slots.
+    ///
+    /// This method acquires slots eagerly, even if not enough slots may be aailable at the moment.
+    /// If the capacity of the pool is roughly equal to `N` or the likelihood of the pool not holding enough slots for pull_exact, then the length of the pool should be checked before hand.
+    /// ```ignore
+    /// if pool.len() >= N {
+    ///     pool.pull_raw_exact::<N>();
+    /// }
+    /// ```
     fn pull_raw_exact<const N: usize>(&self) -> Option<[usize; N]> {
-        if N > self.len() {
+        if N > self.capacity() {
             return None;
         }
         let mut batch = core::array::from_fn(|_| core::mem::MaybeUninit::uninit());
@@ -174,6 +182,14 @@ pub trait BatchedSlotPool: BatchedRawSlotPool + SlotPool {
     }
 
     /// Pulls a batch of exactly `N` SlotHandles from the storage, if it contains enough slots.
+    ///
+    /// This method acquires slots eagerly, even if not enough slots may be aailable at the moment.
+    /// If the capacity of the pool is roughly equal to `N` or the likelihood of the pool not holding enough slots for pull_exact, then the length of the pool should be checked before hand.
+    /// ```ignore
+    /// if pool.len() >= N {
+    ///     pool.pull_exact::<N>();
+    /// }
+    /// ```
     fn pull_exact<const N: usize>(&self) -> Option<[SlotHandle; N]> {
         let batch = BatchedRawSlotPool::pull_raw_exact(self);
         let id = self.id();

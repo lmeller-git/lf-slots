@@ -131,7 +131,9 @@ pub mod core {
 
 pub mod prelude {
     //! reexports common traits implemeneted by `lf-slot` types.
-    pub use crate::{BatchedSlotPool, SlotPool, SlotPoolMeta};
+    #[cfg(feature = "alloc")]
+    pub use crate::Slots;
+    pub use crate::{BatchedSlotPool, SlotPool, SlotPoolMeta, define_inline_slots};
 }
 
 /// Define a type alias for an `InlineSlots<N, { shards(N) }, { words_per_shard(N) }>`.

@@ -38,16 +38,6 @@ pub(crate) struct BitsetStorage<const WORDS: usize = WORDS_PER_CACHE_LINE> {
     words: CachePadded<[AtomicWord; WORDS]>,
 }
 
-impl<const WORDS: usize> BitsetStorage<WORDS> {
-    fn free_count(&self) -> usize {
-        const { assert!(WORDS.is_power_of_two()) };
-        self.words
-            .iter()
-            .map(|w| w.load(Ordering::Acquire).count_ones() as usize)
-            .sum()
-    }
-}
-
 impl<const WORDS: usize> Default for BitsetStorage<WORDS> {
     fn default() -> Self {
         const { assert!(WORDS.is_power_of_two()) };
@@ -127,7 +117,11 @@ impl<const WORDS: usize> BatchedRawSlotPool for BitsetStorage<WORDS> {
 
 impl<const WORDS: usize> SlotPoolMeta for BitsetStorage<WORDS> {
     fn len(&self) -> usize {
-        self.free_count()
+        const { assert!(WORDS.is_power_of_two()) };
+        self.words
+            .iter()
+            .map(|w| w.load(Ordering::Acquire).count_ones() as usize)
+            .sum()
     }
 
     fn capacity(&self) -> usize {

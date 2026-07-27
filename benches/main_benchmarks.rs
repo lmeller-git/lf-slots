@@ -819,68 +819,76 @@ mod small_capacity {
 #[cfg(all(feature = "alloc", feature = "word-slots"))]
 mod api_tier_cost {
     use criterion::{Criterion, Throughput};
-    use lf_slots::{
-        SlotPool,
-        core::BatchedRawSlotPool,
-        define_inline_slots,
-        define_inline_wordslots,
-    };
+    use lf_slots::{BatchedSlotPool, SlotPool, define_inline_slots, define_inline_wordslots};
 
     use crate::common::{ArrayQueuePool, IndexPool};
 
-    const CAP: usize = 4;
-    const ITERS: usize = 100;
+    const CAP: usize = 32;
+    const ITERS: usize = 400;
 
     define_inline_slots!(InlineSlots4, CAP);
     define_inline_wordslots!(InlineWordSlots4, CAP);
 
     pub(crate) fn bench_word_granularity(c: &mut Criterion) {
         let mut group = c.benchmark_group("API Tier Instruction Cost (Raw vs Scalar)");
-        let total_slots = (CAP * ITERS) as u64; // 4 * 100 = 400 total operations
+        let total_slots = (CAP * ITERS) as u64;
         group.throughput(Throughput::Elements(total_slots));
 
-        // 1. Scalar pull() loop on generic bitset: 4 individual CAS/bitwise ops
         group.bench_function("InlineSlots (Scalar Pulls)", |b| {
             b.iter(|| {
                 let pool = InlineSlots4::new();
+                let mut handles = Vec::with_capacity(CAP);
                 for _ in 0..ITERS {
-                    let mut handles = Vec::with_capacity(CAP);
                     for _ in 0..CAP {
                         if let Some(h) = pool.pull() {
                             handles.push(h);
                         }
                     }
-                    drop(handles);
+                    for h in handles.drain(..) {
+                        pool.put(h).unwrap();
+                    }
                 }
             });
         });
 
-        // 2. Single batch pull on generic bitset: 1 CAS claims all 4 slots
-        group.bench_function("InlineSlots (pull_raw_batch)", |b| {
+        group.bench_function("InlineSlots (pull_batch)", |b| {
+            b.iter(|| {
+                let pool = InlineSlots4::new();
+                for _ in 0..ITERS / 2 {
+                    // onw batch == Word::BITS == 64 slots == 2 * CAP
+                    if let Some(batch) = pool.pull_batch() {
+                        pool.put_batch(batch).unwrap();
+                    }
+                }
+            });
+        });
+
+        group.bench_function("InlineSlots (pull_exact)", |b| {
             b.iter(|| {
                 let pool = InlineSlots4::new();
                 for _ in 0..ITERS {
-                    if let Some(batch) = pool.pull_raw_batch() {
-                        unsafe {
-                            pool.put_raw_batch(batch);
+                    if let Some(batch) = pool.pull_exact::<CAP>() {
+                        for h in batch {
+                            pool.put(h).unwrap();
                         }
                     }
                 }
-            });
+            })
         });
 
-        // 3. Single batch pull on inline WordSlots (CAP = 4)
         group.bench_function("WordInlineSlots", |b| {
             b.iter(|| {
                 let pool = InlineWordSlots4::new();
+                let mut handles = Vec::with_capacity(CAP);
                 for _ in 0..ITERS {
-                    let mut handles = Vec::with_capacity(CAP);
                     for _ in 0..CAP {
                         if let Some(h) = pool.pull() {
                             handles.push(h);
                         }
                     }
-                    drop(handles);
+                    for h in handles.drain(..) {
+                        pool.put(h).unwrap();
+                    }
                 }
             });
         });
@@ -888,14 +896,16 @@ mod api_tier_cost {
         group.bench_function("ArrayQueue", |b| {
             b.iter(|| {
                 let pool = ArrayQueuePool::new(CAP);
+                let mut handles = Vec::with_capacity(CAP);
                 for _ in 0..ITERS {
-                    let mut handles = Vec::with_capacity(CAP);
                     for _ in 0..CAP {
                         if let Some(h) = pool.pull_() {
                             handles.push(h);
                         }
                     }
-                    drop(handles);
+                    for h in handles.drain(..) {
+                        pool.put_(h);
+                    }
                 }
             });
         });
