@@ -252,3 +252,32 @@ impl Iterator for BatchIter {
 }
 
 impl ExactSizeIterator for BatchIter {}
+
+#[cfg(all(test, not(miri), not(loom), not(shuttle)))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split() {
+        let batch = Batch::new(
+            ID::next(),
+            RawBatch {
+                starting_idx: 0,
+                mask: Word::MAX >> (WORD_BITS / 2),
+            },
+        );
+
+        assert_eq!(batch.count(), WORD_BITS / 2);
+        let (l, r) = batch.split_at(WORD_BITS);
+        assert!(r.is_none());
+        assert_eq!(l.count(), WORD_BITS / 2);
+
+        let (l, r) = l.split_at(0);
+        assert_eq!(l.count(), 0);
+        assert_eq!(r.as_ref().unwrap().count(), WORD_BITS / 2);
+
+        let (l, r) = r.unwrap().split_at(WORD_BITS / 4);
+        assert_eq!(l.count(), WORD_BITS / 4);
+        assert_eq!(l.count() + r.unwrap().count(), WORD_BITS / 2);
+    }
+}

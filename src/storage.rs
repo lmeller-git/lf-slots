@@ -601,3 +601,34 @@ pub mod batched {
         }
     }
 }
+
+#[cfg(all(test, not(miri), not(loom), not(shuttle)))]
+mod tests {
+    #[cfg(all(feature = "word-slots", feature = "alloc"))]
+    use super::batched::WordSlots;
+    #[cfg(feature = "alloc")]
+    use crate::Slots;
+    use crate::define_inline_slots;
+    #[cfg(feature = "word-slots")]
+    use crate::define_inline_wordslots;
+
+    fn assert_send_sync<S>(_: S)
+    where
+        S: Send + Sync,
+    {
+    }
+
+    #[test]
+    fn send_sync_pools() {
+        define_inline_slots!(SlotPool, 1);
+        assert_send_sync(SlotPool::new());
+        #[cfg(feature = "alloc")]
+        assert_send_sync(Slots::new(1));
+        #[cfg(feature = "word-slots")]
+        define_inline_wordslots!(WordSlotPool, 1);
+        #[cfg(feature = "word-slots")]
+        assert_send_sync(WordSlotPool::new());
+        #[cfg(all(feature = "word-slots", feature = "alloc"))]
+        assert_send_sync(WordSlots::new(1));
+    }
+}
