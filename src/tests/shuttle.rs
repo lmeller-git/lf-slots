@@ -1,6 +1,15 @@
 use crate::{
     define_inline_slots,
-    tests::stubs::{batch_mpmc, batch_spsc, linearizable, mixed_mpmc, mpmc, mpsc, spsc},
+    tests::stubs::{
+        batch_mpmc,
+        batch_spsc,
+        exact_batch_mpmc,
+        linearizable,
+        mixed_mpmc,
+        mpmc,
+        mpsc,
+        spsc,
+    },
 };
 
 const RETRIES: usize = 100;
@@ -78,6 +87,18 @@ fn batch_mpmc_impl() {
         RETRIES,
         DEPTH,
     );
+}
+
+#[test]
+fn exact_test_mpmc() {
+    shuttle::check_pct(
+        || {
+            let storage = Storage10::new();
+            exact_batch_mpmc(storage);
+        },
+        RETRIES,
+        DEPTH,
+    )
 }
 
 #[test]

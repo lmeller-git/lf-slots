@@ -9,6 +9,7 @@ use crate::{
         batch_mpmc,
         batch_smoke,
         batch_spsc,
+        exact_batch_mpmc,
         len_empty_full,
         linearizable,
         mixed_mpmc,
@@ -154,6 +155,12 @@ mod inline {
     }
 
     #[test]
+    fn exact_batch_mpmc_impl() {
+        let storage = Storage2000::new();
+        exact_batch_mpmc(storage);
+    }
+
+    #[test]
     fn mixed_mpmc_impl() {
         let storage = Storage2000::new();
         mixed_mpmc(storage);
@@ -242,6 +249,12 @@ mod heap {
     fn batch_mpmc_impl() {
         let storage = Slots::new(2000);
         batch_mpmc(storage);
+    }
+
+    #[test]
+    fn exact_batch_mpmc_impl() {
+        let storage = Slots::new(2000);
+        exact_batch_mpmc(storage);
     }
 
     #[test]
@@ -352,6 +365,12 @@ mod word_slots {
     fn batch_mpmc_impl() {
         let storage = Storage2000::new();
         batch_mpmc(storage);
+    }
+
+    #[test]
+    fn exact_batch_mpmc_impl() {
+        let storage = Storage2000::new();
+        exact_batch_mpmc(storage);
     }
 
     #[test]

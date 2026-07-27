@@ -449,6 +449,78 @@ where
     assert!(storage.is_full());
 }
 
+pub(crate) fn exact_batch_mpmc<S>(storage: S)
+where
+    S: BatchedSlotPool + Send + Sync + 'static,
+{
+    #[cfg(not(any(miri, loom, shuttle)))]
+    const BATCH: usize = 100;
+    #[cfg(any(loom, miri, shuttle))]
+    const BATCH: usize = 5;
+
+    assert!(BATCH <= storage.capacity());
+    let capacity = storage.capacity();
+    let storage = Arc::new(storage);
+
+    let mut tracker = Vec::new();
+    for _ in 0..capacity {
+        tracker.push(Arc::new(AtomicUsize::new(0)));
+    }
+    let tracker = Arc::new(tracker);
+
+    let mut workers = Vec::new();
+    for thread_id in 0..THREADS {
+        let s_clone = storage.clone();
+        let t_clone = tracker.clone();
+        workers.push(thread::spawn(move || {
+            let owner_marker = thread_id + 1;
+            let mut processed = 0;
+
+            while processed < COUNT {
+                let batch = loop {
+                    if let Some(b) = s_clone.pull_exact::<BATCH>() {
+                        break b;
+                    }
+                    backoff();
+                };
+
+                let batch_len = batch.len();
+
+                // Check exclusive ownership across ALL slots in the batch
+                for slot in &batch {
+                    let old_owner = t_clone[slot.as_usize()].swap(owner_marker, Ordering::AcqRel);
+                    assert_eq!(
+                        old_owner, 0,
+                        "Race condition! Slot {} in batch was claimed by thread {}",
+                        slot, old_owner
+                    );
+                }
+
+                backoff();
+
+                // Verify no other thread hijacked any slot in the batch
+                for slot in batch {
+                    let current_owner = t_clone[slot.as_usize()].load(Ordering::Acquire);
+                    assert_eq!(
+                        current_owner, owner_marker,
+                        "Slot {} in batch was hijacked by thread {}!",
+                        slot, current_owner
+                    );
+                    t_clone[slot.as_usize()].store(0, Ordering::Release);
+                    assert!(s_clone.put(slot).is_ok());
+                }
+
+                processed += batch_len;
+            }
+        }));
+    }
+
+    for w in workers {
+        w.join().unwrap();
+    }
+    assert!(storage.is_full());
+}
+
 /// Stress test interleaving ALL allocation paths concurrently across threads:
 /// - Single pulls (`pull`)
 /// - Raw single pulls (`pull_raw`)

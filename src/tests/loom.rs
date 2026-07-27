@@ -1,9 +1,19 @@
 use crate::{
     define_inline_slots,
-    tests::stubs::{batch_mpmc, batch_spsc, linearizable, mixed_mpmc, mpmc, mpsc, spsc},
+    tests::stubs::{
+        batch_mpmc,
+        batch_spsc,
+        exact_batch_mpmc,
+        linearizable,
+        mixed_mpmc,
+        mpmc,
+        mpsc,
+        spsc,
+    },
 };
 
 define_inline_slots!(Storage2, 2);
+define_inline_slots!(Storage10, 10);
 
 #[test]
 fn spsc_impl() {
@@ -51,6 +61,14 @@ fn batch_mpmc_impl() {
         let storage = Storage2::new();
         batch_mpmc(storage);
     });
+}
+
+#[test]
+fn exact_batch_mpmc_impl() {
+    loom::model(|| {
+        let storage = Storage10::new();
+        exact_batch_mpmc(storage);
+    })
 }
 
 #[test]
