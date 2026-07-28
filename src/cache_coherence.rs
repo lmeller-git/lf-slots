@@ -23,13 +23,16 @@ use crate::{
 
 /// interface for a type used to improve cacheline coherence under contention
 pub trait CoherenceProvider {
-    /// returns a discriminant used to inform the slot pool of the identiy of the callign thread.
+    /// returns a hint used to inform the slot pool of the identiy of the calling thread and its affinity towards a unit of storage.
     fn current_hint(&self) -> usize;
-    /// Advances the hnts internal state with some weight `count`. This does not necessarily correspond to an increase of `current_hint`
+    /// Advances the hints internal state with some weight `count`. This does not necessarily correspond to an increase of `current_hint`.
+    ///
+    /// count is measured conceptually (not stricly) in bits and may be interpreted as the weigthed "number of bits dirtied by this operation".
+    /// thus, it can be used to weight how "dirty" a unit of storage should be before leaving it.
     fn advance_hint_by(&self, count: usize);
 }
 
-/// Does not perfrom any scheduling.
+/// Does not perform any scheduling.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoCoherence;
 
@@ -41,7 +44,12 @@ impl CoherenceProvider for NoCoherence {
     fn advance_hint_by(&self, _: usize) {}
 }
 
-/// per thread round robin
+/// per thread round robin over a ring-buffer.
+///
+/// Each thread walks a ring-buffer at a speed determined by its actions.
+///
+/// One step is taken per `STEPS` "dirtied bits".
+/// `STEP` may be adjusted to increase or decrease the walking speed.
 #[cfg(feature = "std")]
 #[derive(Debug, Default)]
 pub struct ThreadLocalRoundRobin<const STEP: usize = BITS_PER_CACHE_LINE> {
@@ -56,36 +64,32 @@ impl<const STEP: usize> ThreadLocalRoundRobin<STEP> {
             state: ThreadLocal::new().into(),
         }
     }
+
+    fn state(&self) -> &core::cell::Cell<(usize, usize)> {
+        self.state.get_or(|| {
+            let current_thread_id = crate::sync::thread::current().id();
+            let mut hasher = std::hash::DefaultHasher::new();
+            current_thread_id.hash(&mut hasher);
+            let start = hasher.finish();
+            core::cell::Cell::new((start as usize, 1))
+        })
+    }
 }
 
 #[cfg(feature = "std")]
 impl<const STEP: usize> CoherenceProvider for ThreadLocalRoundRobin<STEP> {
     #[inline]
     fn current_hint(&self) -> usize {
-        self.state
-            .get_or(|| {
-                let current_thread_id = crate::sync::thread::current().id();
-                let mut hasher = std::hash::DefaultHasher::new();
-                current_thread_id.hash(&mut hasher);
-                let start = hasher.finish();
-                core::cell::Cell::new((start as usize, 1))
-            })
-            .get()
-            .0
+        self.state().get().0
     }
 
     #[inline]
     fn advance_hint_by(&self, count: usize) {
-        let state = self.state.get_or(|| {
-            let current_thread_id = crate::sync::thread::current().id();
-            let mut hasher = std::hash::DefaultHasher::new();
-            current_thread_id.hash(&mut hasher);
-            let start = hasher.finish();
-            core::cell::Cell::new((start as usize, 1))
-        });
-
+        let state = self.state();
         let (mut hint, mut counter) = state.get();
 
+        // we advance once per STEP advances.
+        // the default STEP is BITS_PER_CACHE_LINE
         counter += count;
         if counter >= STEP {
             let steps = counter / STEP;
@@ -96,13 +100,20 @@ impl<const STEP: usize> CoherenceProvider for ThreadLocalRoundRobin<STEP> {
     }
 }
 
-/// Sharded Round-Robin provider for `no_std`.
-pub struct StripedRoundRobin<const STRIPES: usize = 8, const STEP: usize = BITS_PER_CACHE_LINE> {
+/// round robin provider for `no_std`.
+///
+/// Each thread walks a ring-buffer at a speed determined by its actions.
+///
+/// `STEP` may be adjusted to increase or decrease the walking speed.
+///
+/// One step is taken per `STEPS` "dirtied bits".
+/// `STRIPES` may be adjusted to reflect the correct number of concurrent callers.
+pub struct StripedRoundRobin<const STEP: usize = BITS_PER_CACHE_LINE, const STRIPES: usize = 8> {
     stripes: [CachePadded<(AtomicUsize, AtomicUsize)>; STRIPES],
 }
 
-impl<const STRIPES: usize, const STEP: usize> StripedRoundRobin<STRIPES, STEP> {
-    /// New StripedRoundRobin
+impl<const STEP: usize, const STRIPES: usize> StripedRoundRobin<STEP, STRIPES> {
+    /// Constructs a new StripedRoundRobin
     pub fn new() -> Self {
         Self {
             stripes: core::array::from_fn(|i| (AtomicUsize::new(i), AtomicUsize::new(1)).into()),
@@ -124,14 +135,14 @@ impl<const STRIPES: usize, const STEP: usize> StripedRoundRobin<STRIPES, STEP> {
     }
 }
 
-impl<const STRIPES: usize, const STEP: usize> Default for StripedRoundRobin<STRIPES, STEP> {
+impl<const STEP: usize, const STRIPES: usize> Default for StripedRoundRobin<STEP, STRIPES> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const STRIPES: usize, const STEP: usize> CoherenceProvider
-    for StripedRoundRobin<STRIPES, STEP>
+impl<const STEP: usize, const STRIPES: usize> CoherenceProvider
+    for StripedRoundRobin<STEP, STRIPES>
 {
     #[inline]
     fn current_hint(&self) -> usize {
@@ -168,6 +179,13 @@ pub struct AutoCoherenceProvider {
     provider: StripedRoundRobin,
     #[cfg(all(feature = "std", not(test), not(loom), not(shuttle)))]
     provider: ThreadLocalRoundRobin,
+}
+
+impl AutoCoherenceProvider {
+    /// Constructs a new `AutoCoherenceProvider`
+    pub fn new() -> Self {
+        Self::default()
+    }
 }
 
 impl CoherenceProvider for AutoCoherenceProvider {

@@ -3,7 +3,7 @@ use crate::{
     SlotHandle,
     SlotPool,
     SlotPoolMeta,
-    bitshard::{BitsetStorage, ShardStorage, WORDS_PER_CACHE_LINE},
+    bitshard::{BITS_PER_CACHE_LINE, BitsetStorage, ShardStorage, WORDS_PER_CACHE_LINE},
     cache_coherence::{AutoCoherenceProvider, CoherenceProvider},
     core_internal::{ID, RawBatch, WORD_BITS, Word},
     slot_alloc::{BatchedRawSlotPool, BatchedSlotPool, RawSlotPool},
@@ -16,6 +16,12 @@ pub(crate) trait Buffer {
     fn capacity(&self) -> usize;
     fn inner(&self) -> &[Self::Slot];
 }
+
+// We do not keep a hint over which shards may currently be non-empty:
+// For small capacities, iterating over the shards is almost free, the hint would likely not be much cheaper.
+// For large capacities:
+// - under high contention such a hint could be expected to help the most, however it would have to be CachePadded itself. This would ~2x memory consumption, which is likely not worth it.
+// - under low/no contention a CoherenceProvider can be constructed such that we get a heuristic hint "for free". The defualt RoundRobin implementations supply this already.
 
 pub(crate) struct GenericStorage<B, C> {
     buffer: B,
@@ -102,8 +108,11 @@ where
             // we ensure that 0 <= start < SHARD SIZE and SHARD_SIZE > 0
             let item = unsafe { inner.get_unchecked(start) };
             if let Some(inner_idx) = item.pull_raw() {
+                // we advance by BITS_PER_CACHE_LINE / WORD_BITS because we want to advance once per consumed word, i.e. every Word::BITS calls
+                // we want to advance this often to dodge incoming puts on this shard.
+                // in the spin-loop/high throughput benchmark this proved to be the best tradeoff, however under real usecases this may not be true.
                 self.coherence_hint
-                    .advance_hint_by(<B::Slot as ShardStorage>::SHARD_BITS / WORD_BITS);
+                    .advance_hint_by(BITS_PER_CACHE_LINE / WORD_BITS);
                 return Some(base_offset + inner_idx);
             }
 
@@ -153,7 +162,12 @@ where
             let item = unsafe { inner.get_unchecked(start) };
             if let Some(mut inner_batch) = item.pull_raw_batch() {
                 inner_batch.starting_idx += base_offset;
-                self.coherence_hint.advance_hint_by(WORD_BITS);
+                // we advance by BITS_PER_CACHE_LINE / WORDS_PER_SHARD, because we want to advance once all words in this shard are exhausted, i.e. every WORDS_PER_SHARD calls.
+                // this is optimal under workflows where only pull_batch is called, because we only ever pull and put full batches and thus know exactly when to advance.
+                // under mixed workflows it is unclear what the best strategy should be.
+                self.coherence_hint.advance_hint_by(
+                    (BITS_PER_CACHE_LINE * WORD_BITS) / <B::Slot as ShardStorage>::SHARD_BITS,
+                );
                 return Some(inner_batch);
             }
 
@@ -414,10 +428,7 @@ impl Slots<AutoCoherenceProvider> {
     /// Constructs a new `Slots` instance with specified coherence provider.
     pub fn with_coherence_provider<C: CoherenceProvider + Default>(size: usize) -> Slots<C> {
         Slots {
-            raw: GenericStorage::new(
-                HeapBuf::new(size.div_ceil(crate::bitshard::BITS_PER_CACHE_LINE)),
-                size,
-            ),
+            raw: GenericStorage::new(HeapBuf::new(size.div_ceil(BITS_PER_CACHE_LINE)), size),
         }
     }
 }
