@@ -14,6 +14,7 @@ pub trait SlotPoolMeta {
     /// Is the storage empty?
     ///
     /// In the context of this crate a storage is empty if all slots are allocated.
+    #[inline]
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -21,6 +22,7 @@ pub trait SlotPoolMeta {
     /// Is the storage full?
     ///
     /// In the context of this crate a storage is full if all slots are free.
+    #[inline]
     fn is_full(&self) -> bool {
         self.len() == self.capacity()
     }
@@ -34,6 +36,7 @@ pub trait SlotPool: RawSlotPool {
     fn id(&self) -> ID;
 
     /// Pull a `SlotHandle` from the storage if it is not empty.
+    #[inline]
     fn pull(&self) -> Option<SlotHandle> {
         RawSlotPool::pull_raw(self).map(|idx| SlotHandle::new(idx, self.id()))
     }
@@ -41,6 +44,7 @@ pub trait SlotPool: RawSlotPool {
     /// Put a `SlotHandle` back into the storage to free the associated slot.
     ///
     /// Errs and returns the `SlotHandle`, if the operation is not permitted.
+    #[inline]
     fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
         if *index.id() != self.id() {
             return Err(index);
@@ -102,6 +106,7 @@ pub trait BatchedRawSlotPool: RawSlotPool {
     ///    // ...
     /// }
     /// ```
+    #[inline]
     fn pull_raw_exact<const N: usize>(&self) -> Option<[usize; N]> {
         if N > self.capacity() {
             return None;
@@ -162,6 +167,7 @@ pub trait BatchedRawSlotPool: RawSlotPool {
 pub trait BatchedSlotPool: BatchedRawSlotPool + SlotPool {
     /// Pull a `Batch` from the storage if it is not empty.
     /// The pulled batch is non-empty.
+    #[inline]
     fn pull_batch(&self) -> Option<Batch> {
         BatchedRawSlotPool::pull_raw_batch(self).map(|raw| Batch::new(self.id(), raw))
     }
@@ -169,6 +175,7 @@ pub trait BatchedSlotPool: BatchedRawSlotPool + SlotPool {
     /// Put a `Batch` back into the storage to free the associated slots.
     ///
     /// Errs and returns the `Batch` if the operation is not permitted.
+    #[inline]
     fn put_batch(&self, batch: Batch) -> Result<(), Batch> {
         if *batch.id() != self.id() {
             return Err(batch);
@@ -194,6 +201,7 @@ pub trait BatchedSlotPool: BatchedRawSlotPool + SlotPool {
     ///    // ...
     /// }
     /// ```
+    #[inline]
     fn pull_exact<const N: usize>(&self) -> Option<[SlotHandle; N]> {
         let batch = BatchedRawSlotPool::pull_raw_exact(self);
         let id = self.id();

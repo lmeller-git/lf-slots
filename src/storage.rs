@@ -96,6 +96,7 @@ where
     B::Slot: ShardStorage + RawSlotPool,
     C: CoherenceProvider,
 {
+    #[inline]
     fn pull_raw(&self) -> Option<usize> {
         let inner = self.buffer.inner();
         let cap = self.buffer.capacity();
@@ -130,6 +131,7 @@ where
         None
     }
 
+    #[inline]
     unsafe fn put_raw(&self, index: usize) -> bool {
         let inner = self.buffer.inner();
 
@@ -152,6 +154,7 @@ where
     B::Slot: ShardStorage + BatchedRawSlotPool,
     C: CoherenceProvider,
 {
+    #[inline]
     fn pull_raw_batch(&self) -> Option<RawBatch> {
         let inner = self.buffer.inner();
         let cap = self.buffer.capacity();
@@ -185,6 +188,7 @@ where
         None
     }
 
+    #[inline]
     unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
         let inner = self.buffer.inner();
 
@@ -230,6 +234,7 @@ where
     B: Buffer,
     B::Slot: SlotPoolMeta + ShardStorage,
 {
+    #[inline]
     fn len(&self) -> usize {
         self.buffer
             .inner()
@@ -238,6 +243,7 @@ where
             .sum::<usize>()
     }
 
+    #[inline]
     fn capacity(&self) -> usize {
         self.capacity
     }
@@ -314,18 +320,22 @@ impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize> Default
 impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C> SlotPoolMeta
     for InlineSlots<N, SHARDS, WORDS_PER_SHARD, C>
 {
+    #[inline]
     fn len(&self) -> usize {
         self.raw.len()
     }
 
+    #[inline]
     fn capacity(&self) -> usize {
         self.raw.capacity()
     }
 
+    #[inline]
     fn is_empty(&self) -> bool {
         self.raw.is_empty()
     }
 
+    #[inline]
     fn is_full(&self) -> bool {
         self.raw.is_full()
     }
@@ -334,10 +344,12 @@ impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C> SlotP
 impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C: CoherenceProvider>
     RawSlotPool for InlineSlots<N, SHARDS, WORDS_PER_SHARD, C>
 {
+    #[inline]
     fn pull_raw(&self) -> Option<usize> {
         self.raw.pull_raw()
     }
 
+    #[inline]
     unsafe fn put_raw(&self, index: usize) -> bool {
         // SAFETY:
         // index was returned by self.pull_raw
@@ -348,10 +360,12 @@ impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C: Coher
 impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C: CoherenceProvider>
     BatchedRawSlotPool for InlineSlots<N, SHARDS, WORDS_PER_SHARD, C>
 {
+    #[inline]
     fn pull_raw_batch(&self) -> Option<RawBatch> {
         self.raw.pull_raw_batch()
     }
 
+    #[inline]
     unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
         // SAFETY:
         // The caller promises that this batch is valid
@@ -362,14 +376,17 @@ impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C: Coher
 impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C: CoherenceProvider>
     SlotPool for InlineSlots<N, SHARDS, WORDS_PER_SHARD, C>
 {
+    #[inline]
     fn id(&self) -> ID {
         self.raw.id()
     }
 
+    #[inline]
     fn pull(&self) -> Option<SlotHandle> {
         self.raw.pull()
     }
 
+    #[inline]
     fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
         self.raw.put(index)
     }
@@ -378,10 +395,12 @@ impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C: Coher
 impl<const N: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C: CoherenceProvider>
     BatchedSlotPool for InlineSlots<N, SHARDS, WORDS_PER_SHARD, C>
 {
+    #[inline]
     fn pull_batch(&self) -> Option<Batch> {
         self.raw.pull_batch()
     }
 
+    #[inline]
     fn put_batch(&self, batch: Batch) -> Result<(), Batch> {
         self.raw.put_batch(batch)
     }
@@ -438,18 +457,22 @@ impl Slots<AutoCoherenceProvider> {
 
 #[cfg(feature = "alloc")]
 impl<C> SlotPoolMeta for Slots<C> {
+    #[inline]
     fn len(&self) -> usize {
         self.raw.len()
     }
 
+    #[inline]
     fn capacity(&self) -> usize {
         self.raw.capacity()
     }
 
+    #[inline]
     fn is_empty(&self) -> bool {
         self.raw.is_empty()
     }
 
+    #[inline]
     fn is_full(&self) -> bool {
         self.raw.is_full()
     }
@@ -457,10 +480,12 @@ impl<C> SlotPoolMeta for Slots<C> {
 
 #[cfg(feature = "alloc")]
 impl<C: CoherenceProvider> RawSlotPool for Slots<C> {
+    #[inline]
     fn pull_raw(&self) -> Option<usize> {
         self.raw.pull_raw()
     }
 
+    #[inline]
     unsafe fn put_raw(&self, index: usize) -> bool {
         // SAFETY:
         // index was returned by self.pull_raw
@@ -470,10 +495,12 @@ impl<C: CoherenceProvider> RawSlotPool for Slots<C> {
 
 #[cfg(feature = "alloc")]
 impl<C: CoherenceProvider> BatchedRawSlotPool for Slots<C> {
+    #[inline]
     fn pull_raw_batch(&self) -> Option<RawBatch> {
         self.raw.pull_raw_batch()
     }
 
+    #[inline]
     unsafe fn put_raw_batch(&self, batch: RawBatch) -> bool {
         // SAFETY:
         // the caller promises that this batch is valid
@@ -483,14 +510,17 @@ impl<C: CoherenceProvider> BatchedRawSlotPool for Slots<C> {
 
 #[cfg(feature = "alloc")]
 impl<C: CoherenceProvider> SlotPool for Slots<C> {
+    #[inline]
     fn id(&self) -> ID {
         self.raw.id()
     }
 
+    #[inline]
     fn pull(&self) -> Option<SlotHandle> {
         self.raw.pull()
     }
 
+    #[inline]
     fn put(&self, index: SlotHandle) -> Result<(), SlotHandle> {
         self.raw.put(index)
     }
@@ -498,10 +528,12 @@ impl<C: CoherenceProvider> SlotPool for Slots<C> {
 
 #[cfg(feature = "alloc")]
 impl<C: CoherenceProvider> BatchedSlotPool for Slots<C> {
+    #[inline]
     fn pull_batch(&self) -> Option<Batch> {
         self.raw.pull_batch()
     }
 
+    #[inline]
     fn put_batch(&self, batch: Batch) -> Result<(), Batch> {
         self.raw.put_batch(batch)
     }
@@ -529,30 +561,36 @@ pub mod batched {
     }
 
     impl<P: SlotPoolMeta> SlotPoolMeta for WordPool<P> {
+        #[inline]
         fn len(&self) -> usize {
             self.inner.len() / WORD_BITS
         }
 
+        #[inline]
         fn capacity(&self) -> usize {
             self.inner.capacity() / WORD_BITS
         }
 
+        #[inline]
         fn is_empty(&self) -> bool {
             self.inner.len() < WORD_BITS
         }
 
+        #[inline]
         fn is_full(&self) -> bool {
             (self.inner.capacity() - self.inner.len()) < WORD_BITS
         }
     }
 
     impl<P: BatchedRawSlotPool> RawSlotPool for WordPool<P> {
+        #[inline]
         fn pull_raw(&self) -> Option<usize> {
             let inner_batch = self.inner.pull_raw_batch()?;
             let word_idx = inner_batch.starting_idx / WORD_BITS;
             Some(word_idx)
         }
 
+        #[inline]
         unsafe fn put_raw(&self, index: usize) -> bool {
             let bit_idx = index * WORD_BITS;
 
@@ -567,6 +605,7 @@ pub mod batched {
     }
 
     impl<P: BatchedSlotPool> SlotPool for WordPool<P> {
+        #[inline]
         fn id(&self) -> ID {
             self.inner.id()
         }

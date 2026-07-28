@@ -55,7 +55,7 @@
 //!
 //! ## Choosing a pool type
 //!
-//! Is the capacity of your pool small and performance is more important than memory usage? -> use [`WordSlots`] or `InlineWordSlots`.
+//! Is the capacity of your pool small and performance under contention is more important than memory usage? -> use `WordSlots` or `InlineWordSlots`.
 //!
 //! In all other cases use [`InlineSlots`] or [`Slots`].
 //!

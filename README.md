@@ -67,6 +67,12 @@ fn run() {
 run();
 ```
 
+### Choosing a pool type
+
+Is the capacity of your pool small and performance under contention is more important than memory usage? -> use `WordSlots` or `InlineWordSlots`.
+
+In all other cases use [`InlineSlots`](https://docs.rs/lf-slots/latest/lf_slots/storage/struct.InlineSlots.html) or [`Slots`](https://docs.rs/lf-slots/latest/lf_slots/storage/struct.Slots.html).
+
 ### Platform Support
 
 All storage types use 64-bit or 32-bit atomics depending on the platform. Thus, only platforms with 32-bit or 64-bit native atomics are supported by default.
@@ -89,7 +95,7 @@ which aim to reduce cross-core cache invalidation by spreading cross-core memory
 
 - `std`: Enables `std` and `alloc` support.
 - `alloc`: Enables `alloc` support, allowing usage of dynamically allocated slot pools.
-- `word-slots`: Enables `WordSlots` and `InlineWordSlots` (via [`define_inline_wordslots`](https://docs.rs/lf-slots/latest/lf_slots/macro.define_inline_wordslots.html)), which can be more performant at low capacity.
+- `word-slots`: Enables [`WordSlots`] and `InlineWordSlots` (via [`define_inline_wordslots`](https://docs.rs/lf-slots/latest/lf_slots/macro.define_inline_wordslots.html)), which can be more performant at low capacity.
 - `atomic-fallback`: Uses the `portable-atomic` fallback feature if native atomics are missing. It is discouraged to use this feature when performance matters, as fallback atomics internally rely on locks.
 - `default`: None
 
