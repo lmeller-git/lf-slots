@@ -108,11 +108,14 @@ where
             // we ensure that 0 <= start < SHARD SIZE and SHARD_SIZE > 0
             let item = unsafe { inner.get_unchecked(start) };
             if let Some(inner_idx) = item.pull_raw() {
-                // we advance by BITS_PER_CACHE_LINE / WORD_BITS because we want to advance once per consumed word, i.e. every Word::BITS calls
+                // we advance by SHARD_BITS / WORD_BITS because we want to advance once per consumed word, i.e. every Word::BITS calls.
+                // using SHARD_BITS instead of BITS_PER_CACHE_LINE means that this is automatically scaled to the actual number of words per shard:
+                // if < WORDS_PER_CACHE_LINE words are on each shard, we advance slower than expected, reducing overall contention in small pools.
+                //
                 // we want to advance this often to dodge incoming puts on this shard.
                 // in the spin-loop/high throughput benchmark this proved to be the best tradeoff, however under real usecases this may not be true.
                 self.coherence_hint
-                    .advance_hint_by(BITS_PER_CACHE_LINE / WORD_BITS);
+                    .advance_hint_by(<B::Slot as ShardStorage>::SHARD_BITS / WORD_BITS);
                 return Some(base_offset + inner_idx);
             }
 
