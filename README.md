@@ -8,7 +8,7 @@
 
 # lf-slots
 
-Non-blocking Lock-free index store.
+A Non-blocking Lock-free index pool.
 
 <!-- cargo-rdme start -->
 

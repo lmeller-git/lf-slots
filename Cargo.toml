@@ -32,7 +32,7 @@ members = [
 [workspace.package]
 edition = "2024"
 authors = ["Louis Meller louis.meller@icloud.com"]
-description = "Atomic, lock-free index store using a bitset"
+description = "Atomic, lock-free index pool"
 documentation = "https://docs.rs/lf-slots"
 readme = "README.md"
 license = "MIT"
