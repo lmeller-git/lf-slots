@@ -96,7 +96,6 @@ where
     B::Slot: ShardStorage + RawSlotPool,
     C: CoherenceProvider,
 {
-    #[inline]
     fn pull_raw(&self) -> Option<usize> {
         let inner = self.buffer.inner();
         let cap = self.buffer.capacity();
@@ -154,7 +153,6 @@ where
     B::Slot: ShardStorage + BatchedRawSlotPool,
     C: CoherenceProvider,
 {
-    #[inline]
     fn pull_raw_batch(&self) -> Option<RawBatch> {
         let inner = self.buffer.inner();
         let cap = self.buffer.capacity();

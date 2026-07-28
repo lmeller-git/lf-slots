@@ -106,7 +106,6 @@ pub trait BatchedRawSlotPool: RawSlotPool {
     ///    // ...
     /// }
     /// ```
-    #[inline]
     fn pull_raw_exact<const N: usize>(&self) -> Option<[usize; N]> {
         if N > self.capacity() {
             return None;
