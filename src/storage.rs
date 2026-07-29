@@ -624,11 +624,13 @@ pub mod batched {
         }
     }
 
-    impl<const BIT_CAPACITY: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize> Default
-        for WordPool<InlineSlots<BIT_CAPACITY, SHARDS, WORDS_PER_SHARD, AutoCoherenceProvider>>
+    impl<const BIT_CAPACITY: usize, const SHARDS: usize, const WORDS_PER_SHARD: usize, C> Default
+        for WordPool<InlineSlots<BIT_CAPACITY, SHARDS, WORDS_PER_SHARD, C>>
+    where
+        C: Default + CoherenceProvider,
     {
         fn default() -> Self {
-            Self::new()
+            WordPool::new_in(InlineSlots::with_coherence_provider())
         }
     }
 
