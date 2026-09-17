@@ -1,10 +1,8 @@
 #![allow(unused_imports)]
 #![allow(clippy::disallowed_modules)]
 
-#[cfg(all(not(loom), not(shuttle), not(echeneis)))]
+#[cfg(all(not(loom), not(shuttle)))]
 pub(crate) use core_::*;
-#[cfg(echeneis)]
-pub(crate) use echeneis_::*;
 #[cfg(loom)]
 pub(crate) use loom_::*;
 #[cfg(shuttle)]
@@ -32,7 +30,7 @@ mod loom_ {
     };
 }
 
-#[cfg(all(not(loom), not(shuttle), not(echeneis)))]
+#[cfg(all(not(loom), not(shuttle)))]
 mod core_ {
     #[cfg(feature = "alloc")]
     pub(crate) use alloc::sync::{Arc, Weak};
@@ -43,17 +41,4 @@ mod core_ {
     pub(crate) use std::thread;
 
     pub(crate) use portable_atomic as atomic;
-}
-
-#[cfg(echeneis)]
-mod echeneis_ {
-    #[cfg(feature = "alloc")]
-    pub(crate) use alloc::sync::{Arc, Weak};
-    pub(crate) use core::hint;
-    #[cfg(feature = "std")]
-    pub(crate) use std::sync::{Condvar, Mutex};
-    #[cfg(feature = "std")]
-    pub(crate) use std::thread;
-
-    pub(crate) use echeneis::sync::atomic;
 }

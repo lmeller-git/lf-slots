@@ -1,4 +1,4 @@
-#[cfg(not(any(shuttle, loom, echeneis)))]
+#[cfg(not(any(shuttle, loom)))]
 mod default;
 mod stubs;
 
