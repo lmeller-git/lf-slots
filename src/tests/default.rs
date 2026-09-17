@@ -136,7 +136,7 @@ mod inline {
 
     #[cfg(feature = "word-slots")]
     #[test]
-    fn linearizable_impl() {
+    fn linearizable_words_impl() {
         let storage =
             WStorage10::with_coherence_provider::<crate::cache_coherence::StripedRoundRobin>();
         linearizable(storage);
