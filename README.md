@@ -16,6 +16,11 @@ A Non-blocking Lock-free index pool.
 
 All storage types in this crate are safe to use in a concurrent context, strictly lock-free, and will never block the calling thread.
 
+> [!WARNING]
+> This implementation is *NOT* linearizable.
+> A reader may conclude that the pool is empty, even though no linearizable point existed where the pool was truly empty.
+> This makes the current implementation highly unsafe to use unless linearizability is not a concern.
+
 ### Storage Types
 
 - [`InlineSlots`](https://docs.rs/lf-slots/latest/lf_slots/storage/struct.InlineSlots.html): statically sized storage.
