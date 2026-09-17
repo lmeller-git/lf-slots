@@ -45,7 +45,7 @@ rust-version = "1.85.0"
 default = []
 std = ["alloc", "dep:thread_local", "kasino/std"]
 alloc = ["kasino/alloc"]
-atomic-fallback = ["portable-atomic/fallback"]
+atomic-fallback = ["portable-atomic/fallback", "kasino/atomic-fallback"]
 word-slots = []
 
 [dependencies]
