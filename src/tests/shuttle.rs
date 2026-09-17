@@ -1,5 +1,6 @@
 use crate::{
     define_inline_slots,
+    define_inline_wordslots,
     tests::stubs::{
         batch_mpmc,
         batch_spsc,
@@ -12,10 +13,11 @@ use crate::{
     },
 };
 
-const RETRIES: usize = 100;
-const DEPTH: usize = 4;
+const RETRIES: usize = 1000;
+const DEPTH: usize = 10;
 
 define_inline_slots!(Storage10, 10);
+define_inline_wordslots!(WStorage10, 10);
 
 #[test]
 fn spsc_impl() {
@@ -57,7 +59,8 @@ fn mpmc_impl() {
 fn linearizable_impl() {
     shuttle::check_pct(
         || {
-            let storage = Storage10::new();
+            let storage =
+                WStorage10::with_coherence_provider::<crate::cache_coherence::StripedRoundRobin>();
             linearizable(storage);
         },
         RETRIES,

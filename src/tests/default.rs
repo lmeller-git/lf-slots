@@ -23,10 +23,14 @@ use crate::{
 
 mod inline {
     use super::*;
+    #[cfg(feature = "word-slots")]
+    use crate::define_inline_wordslots;
 
     define_inline_slots!(Storage2, 2);
 
     define_inline_slots!(Storage10, 10);
+    #[cfg(feature = "word-slots")]
+    define_inline_wordslots!(WStorage10, 50);
 
     #[cfg(not(miri))]
     define_inline_slots!(Storage2000, 2000);
@@ -130,9 +134,17 @@ mod inline {
         mpmc(storage);
     }
 
+    #[cfg(feature = "word-slots")]
     #[test]
     fn linearizable_impl() {
-        let storage = Storage10::new();
+        let storage =
+            WStorage10::with_coherence_provider::<crate::cache_coherence::StripedRoundRobin>();
+        linearizable(storage);
+    }
+
+    #[test]
+    fn linearizable_impl() {
+        let storage = Storage10::with_coherence_provider::<NoCoherence>();
         linearizable(storage);
     }
 

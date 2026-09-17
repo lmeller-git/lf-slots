@@ -68,6 +68,9 @@ impl<const STEP: usize> ThreadLocalRoundRobin<STEP> {
     fn state(&self) -> &core::cell::Cell<(usize, usize)> {
         self.state.get_or(|| {
             let current_thread_id = crate::sync::thread::current().id();
+            // TODO:
+            // could use a way more efficient hasher here, we do not need correctness only
+            // "on average most shards should be covered across all threads"
             let mut hasher = std::hash::DefaultHasher::new();
             current_thread_id.hash(&mut hasher);
             let start = hasher.finish();
