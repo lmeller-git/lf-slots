@@ -81,7 +81,7 @@ all-features = true
 
 [workspace.lints.rust]
 unknown-lints = "allow"
-unexpected_cfgs = { level = "allow", check-cfg = ['cfg(loom)', 'cfg(shuttle)', 'cfg(echeneis)'] }
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(loom)', 'cfg(shuttle)'] }
 rust_2018_idioms = { level = "warn", priority = -1 }
 unnameable_types = "warn"
 unreachable_pub = "warn"
