@@ -261,10 +261,9 @@ impl<S: Strategy<Q>, Q: Collection> Strategy<Q> for IndexPoolStrategy<S> {
 
     fn choose_offer_arm(
         &self,
-        state: &impl kasino::storage::StorageBackend<<Self::Gambler as kasino::strategy::Hooked>::Stake>,
+        _state: &impl kasino::storage::StorageBackend<<Self::Gambler as Hooked>::Stake>,
         gambler: &mut Self::Gambler,
     ) -> usize {
-        // we always fail in offer anyways, no need to do any work here
         let Some(item) = gambler.current_item.take() else {
             unreachable!()
         };
@@ -278,7 +277,7 @@ impl<S: Strategy<Q>, Q: Collection> Strategy<Q> for IndexPoolStrategy<S> {
 
     fn choose_poll_arm(
         &self,
-        state: &impl kasino::storage::StorageBackend<<Self::Gambler as kasino::strategy::Hooked>::Stake>,
+        state: &impl kasino::storage::StorageBackend<<Self::Gambler as Hooked>::Stake>,
         gambler: &mut Self::Gambler,
     ) -> usize {
         self.scheduler.choose_poll_arm(state, &mut gambler.gambler)
