@@ -254,6 +254,7 @@ pub struct InlineKasinoSlotPool<
     const WORDS_PER_SHARD: usize = WORDS_PER_CACHE_LINE,
 > {
     bandit: InlineBandit<BitsetStorage<WORDS_PER_SHARD>, IndexPoolStrategy<S>, N, SHARDS>,
+    id: ID,
 }
 
 pub struct InlineKasinoSlotPoolHandle<
@@ -264,6 +265,7 @@ pub struct InlineKasinoSlotPoolHandle<
     const WORDS_PER_SHARD: usize = WORDS_PER_CACHE_LINE,
 > {
     bandit: InlineBanditHandle<'a, BitsetStorage<WORDS_PER_SHARD>, IndexPoolStrategy<S>, N, SHARDS>,
+    parent_id: ID,
 }
 
 impl<
@@ -304,5 +306,38 @@ impl<
 
     unsafe fn put_raw(&mut self, index: usize) -> bool {
         self.bandit.offer(MaybeBatched::Single(index)).is_ok()
+    }
+}
+
+impl<
+    'a,
+    S: Strategy<BitsetStorage<WORDS_PER_SHARD>>,
+    const N: usize,
+    const SHARDS: usize,
+    const WORDS_PER_SHARD: usize,
+> BatchedRawOwnedSlotPool for InlineKasinoSlotPoolHandle<'a, S, N, SHARDS, WORDS_PER_SHARD>
+{
+    fn pull_raw_batch(&mut self) -> Option<RawBatch> {
+        self.bandit
+            .poll(PullRequest::BatchRequest)
+            .ok()
+            .map(MaybeBatched::require_batched)
+    }
+
+    unsafe fn put_raw_batch(&mut self, batch: RawBatch) -> bool {
+        self.bandit.offer(MaybeBatched::Batch(batch)).is_ok()
+    }
+}
+
+impl<
+    'a,
+    S: Strategy<BitsetStorage<WORDS_PER_SHARD>>,
+    const N: usize,
+    const SHARDS: usize,
+    const WORDS_PER_SHARD: usize,
+> OwnedSlotPool for InlineKasinoSlotPoolHandle<'a, S, N, SHARDS, WORDS_PER_SHARD>
+{
+    fn id(&mut self) -> ID {
+        self.parent_id
     }
 }
