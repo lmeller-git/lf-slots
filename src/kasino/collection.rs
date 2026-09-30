@@ -1,4 +1,4 @@
-use kasino::{Collection, Signature};
+use kasino::{Collection, Signature, WithCapacity};
 
 use crate::{
     SlotPoolMeta,
@@ -6,13 +6,20 @@ use crate::{
     core::{BatchedRawSlotPool, RawBatch, RawSlotPool},
 };
 
+/// Represents either a batched or single slot operation result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MaybeBatched {
+    /// A batch of slots returned as a [`RawBatch`].
     Batch(RawBatch),
+    /// A single slot index.
     Single(usize),
 }
 
 impl MaybeBatched {
+    /// Extracts the [`RawBatch`] from a `Batch` variant.
+    ///
+    /// # Panics
+    /// Panics if called on a `Single` variant.
     #[inline]
     pub fn require_batched(self) -> RawBatch {
         let Self::Batch(batch) = self else {
@@ -21,6 +28,10 @@ impl MaybeBatched {
         batch
     }
 
+    /// Extracts the single slot index from a `Single` variant.
+    ///
+    /// # Panics
+    /// Panics if called on a `Batch` variant.
     #[inline]
     pub fn require_single(self) -> usize {
         let Self::Single(index) = self else {
@@ -31,12 +42,16 @@ impl MaybeBatched {
     }
 }
 
+/// Request type for pulling from the storage: either a batch or a single slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PullRequest {
+    /// Request a batch of slots.
     BatchRequest,
+    /// Request a single slot.
     SingleRequest,
 }
 
+/// Signature for the put (offer) operation on the bitset storage.
 #[derive(Debug, Default)]
 pub struct BitsetStoragePut;
 
@@ -52,6 +67,7 @@ impl Signature for BitsetStoragePut {
         Self: 'arm;
 }
 
+/// Signature for the pull (poll) operation on the bitset storage.
 #[derive(Debug, Default)]
 pub struct BitsetStoragePull;
 
@@ -80,12 +96,14 @@ impl<const WORDS: usize> Collection for BitsetStorage<WORDS> {
         <Self::OfferSignature as Signature>::Error<'input, 'arm>,
     > {
         match item {
-            // SAFETY:
-            // we validatedt that this is the correct shard and poll already
-            MaybeBatched::Batch(batch) => unsafe { self.put_raw_batch(batch) }.ok_or(()),
-            // SAFETY:
-            // we validatedt that this is the correct shard and poll already
-            MaybeBatched::Single(index) => unsafe { self.put_raw(index) }.ok_or(()),
+            MaybeBatched::Batch(batch) => {
+                // SAFETY: batch is a valid RawBatch from this storage
+                unsafe { self.put_raw_batch(batch) }.then_some(()).ok_or(())
+            }
+            MaybeBatched::Single(index) => {
+                // SAFETY: index is a valid slot index from this storage
+                unsafe { self.put_raw(index) }.then_some(()).ok_or(())
+            }
         }
     }
 
@@ -98,14 +116,8 @@ impl<const WORDS: usize> Collection for BitsetStorage<WORDS> {
         <Self::PollSignature as Signature>::Error<'input, 'arm>,
     > {
         match input {
-            PullRequest::BatchRequest => self
-                .pull_raw_batch()
-                .map(|batch| MaybeBatched::Batch(batch))
-                .ok_or(()),
-            PullRequest::SingleRequest => self
-                .pull_raw()
-                .map(|index| MaybeBatched::Single(index))
-                .ok_or(()),
+            PullRequest::BatchRequest => self.pull_raw_batch().map(MaybeBatched::Batch).ok_or(()),
+            PullRequest::SingleRequest => self.pull_raw().map(MaybeBatched::Single).ok_or(()),
         }
     }
 
@@ -119,5 +131,11 @@ impl<const WORDS: usize> Collection for BitsetStorage<WORDS> {
 
     fn is_empty(&self) -> bool {
         SlotPoolMeta::is_empty(self)
+    }
+}
+
+impl<const N: usize> WithCapacity<N> for BitsetStorage<N> {
+    fn with_capacity() -> Self {
+        Self::default()
     }
 }

@@ -215,6 +215,12 @@ pub trait BatchedOwnedSlotPool: BatchedRawOwnedSlotPool + OwnedSlotPool {
     }
 }
 
+/// A wrapper strategy that adapts a kasino [`Strategy`] for use with the index pool.
+///
+/// This strategy delegates to an inner scheduler for gambler management while
+/// the offer/poll arm selection is handled by the kasino framework directly
+/// (these methods are not used in the current implementation).
+#[derive(Default)]
 pub struct IndexPoolStrategy<S> {
     scheduler: S,
 }
@@ -224,18 +230,24 @@ impl<S: Strategy<Q>, Q: Collection> Strategy<Q> for IndexPoolStrategy<S> {
 
     fn choose_offer_arm(
         &self,
-        state: &impl kasino::storage::StorageBackend<<Self::Gambler as kasino::strategy::Hooked>::Stake>,
-        gambler: &mut Self::Gambler,
+        _state: &impl kasino::storage::StorageBackend<
+            <Self::Gambler as kasino::strategy::Hooked>::Stake,
+        >,
+        _gambler: &mut Self::Gambler,
     ) -> usize {
-        todo!()
+        // Not used: puts use direct shard access via index.
+        unreachable!("offer arm selection not used")
     }
 
     fn choose_poll_arm(
         &self,
-        state: &impl kasino::storage::StorageBackend<<Self::Gambler as kasino::strategy::Hooked>::Stake>,
-        gambler: &mut Self::Gambler,
+        _state: &impl kasino::storage::StorageBackend<
+            <Self::Gambler as kasino::strategy::Hooked>::Stake,
+        >,
+        _gambler: &mut Self::Gambler,
     ) -> usize {
-        todo!()
+        // Not used: kasino's default `collect` tries all arms on pull failure.
+        unreachable!("poll arm selection not used")
     }
 
     fn fork_gambler(&self, parent: &Self::Gambler) -> Self::Gambler {
@@ -247,16 +259,77 @@ impl<S: Strategy<Q>, Q: Collection> Strategy<Q> for IndexPoolStrategy<S> {
     }
 }
 
+/// An inline kasino-based slot pool with fixed capacity.
+///
+/// This pool uses the kasino framework for lock-free synchronization with
+/// optional linearizability guarantees. The capacity is determined by the
+/// `N`, `SHARDS`, and `WORDS_PER_SHARD` const generics.
+///
+/// # Type Parameters
+/// - `S`: The scheduling strategy (must implement [`Strategy`] for the bitset storage).
+/// - `N`: Total number of slots in the pool.
+/// - `SHARDS`: Number of shards for contention reduction.
+/// - `WORDS_PER_SHARD`: Number of words per shard (default: [`WORDS_PER_CACHE_LINE`]).
+#[allow(private_bounds)]
+#[expect(dead_code, reason = "fields used via kasino's InlineBandit internals")]
 pub struct InlineKasinoSlotPool<
     S: Strategy<BitsetStorage<WORDS_PER_SHARD>>,
     const N: usize,
     const SHARDS: usize,
     const WORDS_PER_SHARD: usize = WORDS_PER_CACHE_LINE,
 > {
-    bandit: InlineBandit<BitsetStorage<WORDS_PER_SHARD>, IndexPoolStrategy<S>, N, SHARDS>,
+    bandit:
+        InlineBandit<BitsetStorage<WORDS_PER_SHARD>, IndexPoolStrategy<S>, SHARDS, WORDS_PER_SHARD>,
     id: ID,
 }
 
+impl<
+    S: Strategy<BitsetStorage<WORDS_PER_SHARD>>,
+    const N: usize,
+    const SHARDS: usize,
+    const WORDS_PER_SHARD: usize,
+> InlineKasinoSlotPool<S, N, SHARDS, WORDS_PER_SHARD>
+where
+    S: Default,
+    kasino::strategy::StrategyStakes<S, BitsetStorage<WORDS_PER_SHARD>>: Default,
+{
+    /// Creates a new [`InlineKasinoSlotPool`] with all slots initially free.
+    pub fn new() -> Self {
+        let bandit = InlineBandit::new();
+        Self {
+            bandit,
+            id: ID::next(),
+        }
+    }
+}
+
+impl<
+    S: Strategy<BitsetStorage<WORDS_PER_SHARD>>,
+    const N: usize,
+    const SHARDS: usize,
+    const WORDS_PER_SHARD: usize,
+> Default for InlineKasinoSlotPool<S, N, SHARDS, WORDS_PER_SHARD>
+where
+    S: Default,
+    kasino::strategy::StrategyStakes<S, BitsetStorage<WORDS_PER_SHARD>>: Default,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A handle to an [`InlineKasinoSlotPool`] for thread-local or scoped access.
+///
+/// This handle provides the [`OwnedSlotPool`], [`RawOwnedSlotPool`], and
+/// [`BatchedRawOwnedSlotPool`] trait implementations for interacting with the pool.
+///
+/// # Type Parameters
+/// - `'a`: Lifetime of the handle (tied to the parent pool).
+/// - `S`: The scheduling strategy.
+/// - `N`: Total number of slots in the pool.
+/// - `SHARDS`: Number of shards.
+/// - `WORDS_PER_SHARD`: Number of words per shard.
+#[allow(private_bounds)]
 pub struct InlineKasinoSlotPoolHandle<
     'a,
     S: Strategy<BitsetStorage<WORDS_PER_SHARD>>,
@@ -264,7 +337,13 @@ pub struct InlineKasinoSlotPoolHandle<
     const SHARDS: usize,
     const WORDS_PER_SHARD: usize = WORDS_PER_CACHE_LINE,
 > {
-    bandit: InlineBanditHandle<'a, BitsetStorage<WORDS_PER_SHARD>, IndexPoolStrategy<S>, N, SHARDS>,
+    bandit: InlineBanditHandle<
+        'a,
+        BitsetStorage<WORDS_PER_SHARD>,
+        IndexPoolStrategy<S>,
+        SHARDS,
+        WORDS_PER_SHARD,
+    >,
     parent_id: ID,
 }
 

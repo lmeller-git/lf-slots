@@ -34,7 +34,8 @@ const _: () = assert!(
     "BITS_PER_CACHE_LINE must be a power of two for bitwise math to work"
 );
 
-pub(crate) struct BitsetStorage<const WORDS: usize = WORDS_PER_CACHE_LINE> {
+#[allow(unnameable_types)]
+pub struct BitsetStorage<const WORDS: usize = WORDS_PER_CACHE_LINE> {
     words: CachePadded<[AtomicWord; WORDS]>,
 }
 

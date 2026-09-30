@@ -246,44 +246,6 @@ macro_rules! define_inline_slots_kasino {
         $crate::define_inline_slots_kasino!($vis $name, $n, { $crate::core::words_per_shard($n) });
     };
     ($vis:vis $name:ident, $n:expr, $w:expr) => {
-        $vis type $name<S = $crate::kasino::AutoStrategy> = $crate::kasino::InlineSlots<$n, { $crate::core::shard_count($n, $w) }, $w, S>;
-    };
-}
-
-/// Defines a type alias for a kasino-based `WordPool<InlineSlots<...>>` with strategy parameter.
-/// Computes the number of shards needed for a word slot pool of size `N` and defines a type alias with correct layout for it.
-///
-/// Usage:
-///
-/// ```rust
-/// use lf_slots::{define_inline_wordslots_kasino, SlotPool};
-///
-/// // a pool with a capacity of 1 and automatically determined number of words per shard
-/// define_inline_wordslots_kasino!(pub(crate) SlotPool1, 1);
-///
-/// let pool: SlotPool1 = SlotPool1::new();
-/// assert!(pool.pull().is_some());
-///
-/// // A word pool with one word per shard and a capacity of 2.
-/// define_inline_wordslots_kasino!(SlotPool2_1, 2, 1);
-///
-/// let pool: SlotPool2_1 = SlotPool2_1::new();
-/// assert!(pool.pull().is_some());
-/// ```
-#[cfg(feature = "word-slots")]
-#[macro_export]
-macro_rules! define_inline_wordslots_kasino {
-    ($vis:vis $name:ident, $n:expr) => {
-        $crate::define_inline_wordslots_kasino!($vis $name, $n, { $crate::core::words_per_shard($n * $crate::core::Word::BITS as usize) });
-    };
-    ($vis:vis $name:ident, $n:expr, $w:expr) => {
-        $vis type $name<S = $crate::kasino::AutoStrategy> = $crate::kasino::batched::KasinoWordPool<
-            $crate::kasino::InlineSlots<
-                { $n * $crate::core::Word::BITS as usize },
-                { $crate::core::shard_count($n * $crate::core::Word::BITS as usize, $w) },
-                $w,
-                S
-            >
-        >;
+        $vis type $name<S = $crate::kasino::AutoStrategy<{$crate::core::words_per_shard($n)}>> = $crate::kasino::InlineKasinoSlotPool<S, $n, { $crate::core::shard_count($n, $w) }, $w>;
     };
 }
