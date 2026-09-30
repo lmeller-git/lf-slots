@@ -2,7 +2,7 @@ use kasino::{Collection, Signature, WithCapacity};
 
 use crate::{
     SlotPoolMeta,
-    bitshard::BitsetStorage,
+    bitshard::{BitsetStorage, ShardStorage},
     core::{BatchedRawSlotPool, RawBatch, RawSlotPool},
 };
 
@@ -13,6 +13,11 @@ pub enum MaybeBatched {
     Batch(RawBatch),
     /// A single slot index.
     Single(usize),
+}
+impl Default for MaybeBatched {
+    fn default() -> Self {
+        Self::Single(0)
+    }
 }
 
 impl MaybeBatched {
@@ -97,12 +102,21 @@ impl<const WORDS: usize> Collection for BitsetStorage<WORDS> {
     > {
         match item {
             MaybeBatched::Batch(batch) => {
+                let col = batch.starting_idx & <Self as ShardStorage>::SHARD_MASK;
                 // SAFETY: batch is a valid RawBatch from this storage
-                unsafe { self.put_raw_batch(batch) }.then_some(()).ok_or(())
+                unsafe {
+                    self.put_raw_batch(RawBatch {
+                        starting_idx: col,
+                        mask: batch.mask,
+                    })
+                }
+                .then_some(())
+                .ok_or(())
             }
             MaybeBatched::Single(index) => {
+                let col = index & <Self as ShardStorage>::SHARD_MASK;
                 // SAFETY: index is a valid slot index from this storage
-                unsafe { self.put_raw(index) }.then_some(()).ok_or(())
+                unsafe { self.put_raw(col) }.then_some(()).ok_or(())
             }
         }
     }

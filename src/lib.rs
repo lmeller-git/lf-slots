@@ -128,6 +128,14 @@ pub use slot_alloc::{BatchedSlotPool, SlotPool, SlotPoolMeta};
 #[cfg(feature = "word-slots")]
 pub use storage::batched;
 
+// Kasino-based traits
+pub use crate::kasino::{
+    BatchedOwnedSlotPool,
+    BatchedRawOwnedSlotPool,
+    OwnedSlotPool,
+    OwnedSlotPoolMeta,
+    RawOwnedSlotPool,
+};
 pub use crate::storage::InlineSlots;
 #[cfg(feature = "alloc")]
 pub use crate::storage::Slots;
@@ -147,7 +155,14 @@ pub mod prelude {
     //! reexports common traits implemeneted by `lf-slot` types.
     #[cfg(feature = "alloc")]
     pub use crate::Slots;
-    pub use crate::{BatchedSlotPool, SlotPool, SlotPoolMeta, define_inline_slots};
+    pub use crate::{
+        BatchedSlotPool,
+        SlotPool,
+        SlotPoolMeta,
+        define_inline_slots,
+        define_inline_slots_kasino,
+        kasino::{BatchedOwnedSlotPool, OwnedSlotPool, OwnedSlotPoolMeta},
+    };
 }
 
 /// Define a type alias for an `InlineSlots<N, { shards(N) }, { words_per_shard(N) }>`.
@@ -225,19 +240,21 @@ macro_rules! define_inline_wordslots {
 /// Usage:
 ///
 /// ```rust
-/// use lf_slots::{define_inline_slots_kasino, SlotPool};
+/// use lf_slots::{define_inline_slots_kasino, OwnedSlotPool};
 ///
 /// // a pool with a capacity of 1 and automatically determined number of words per shard
 /// define_inline_slots_kasino!(pub(crate) SlotPool1, 1);
 ///
 /// let pool: SlotPool1 = SlotPool1::new();
-/// assert!(pool.pull().is_some());
+/// let mut handle = pool.handle();
+/// assert!(handle.pull().is_some());
 ///
 /// // a pool with one word per shard and 128 slots.
 /// define_inline_slots_kasino!(SlotPool128_1, 128, 1);
 ///
 /// let pool: SlotPool128_1 = SlotPool128_1::new();
-/// assert!(pool.pull().is_some())
+/// let mut handle = pool.handle();
+/// assert!(handle.pull().is_some())
 ///
 /// ```
 #[macro_export]

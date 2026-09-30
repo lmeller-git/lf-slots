@@ -1,7 +1,12 @@
-use kasino::{Collection, InlineBandit, InlineBanditHandle, strategy::Strategy};
+use kasino::{
+    Collection,
+    InlineBandit,
+    InlineBanditHandle,
+    strategy::{Hooked, Strategy},
+};
 
 use crate::{
-    bitshard::BitsetStorage,
+    bitshard::{BitsetStorage, ShardStorage},
     core::WORDS_PER_CACHE_LINE,
     core_internal::{Batch, ID, RawBatch, SlotHandle},
     kasino::collection::{MaybeBatched, PullRequest},
@@ -217,45 +222,80 @@ pub trait BatchedOwnedSlotPool: BatchedRawOwnedSlotPool + OwnedSlotPool {
 
 /// A wrapper strategy that adapts a kasino [`Strategy`] for use with the index pool.
 ///
-/// This strategy delegates to an inner scheduler for gambler management while
-/// the offer/poll arm selection is handled by the kasino framework directly
-/// (these methods are not used in the current implementation).
+/// This strategy delegates to an inner scheduler for gambler management and arm selection.
 #[derive(Default)]
 pub struct IndexPoolStrategy<S> {
     scheduler: S,
 }
 
+/// TODO
+#[derive(Debug, Default)]
+pub struct IndexPoolStrategyItemForwarder<G> {
+    gambler: G,
+    current_item: Option<MaybeBatched>,
+}
+
+impl<G: Hooked> Hooked for IndexPoolStrategyItemForwarder<G> {
+    type RequestedPadding = G::RequestedPadding;
+    type Stake = G::Stake;
+
+    fn on_offer_succ(&mut self, sub_state: &Self::Stake) {
+        self.gambler.on_offer_succ(sub_state);
+    }
+
+    fn on_offer_fail(&mut self, sub_state: &Self::Stake) {
+        self.gambler.on_offer_fail(sub_state);
+    }
+
+    fn on_poll_succ(&mut self, sub_state: &Self::Stake) {
+        self.gambler.on_poll_succ(sub_state);
+    }
+
+    fn on_poll_fail(&mut self, sub_state: &Self::Stake) {
+        self.gambler.on_poll_fail(sub_state);
+    }
+}
+
 impl<S: Strategy<Q>, Q: Collection> Strategy<Q> for IndexPoolStrategy<S> {
-    type Gambler = S::Gambler;
+    type Gambler = IndexPoolStrategyItemForwarder<S::Gambler>;
 
     fn choose_offer_arm(
         &self,
-        _state: &impl kasino::storage::StorageBackend<
-            <Self::Gambler as kasino::strategy::Hooked>::Stake,
-        >,
-        _gambler: &mut Self::Gambler,
+        state: &impl kasino::storage::StorageBackend<<Self::Gambler as kasino::strategy::Hooked>::Stake>,
+        gambler: &mut Self::Gambler,
     ) -> usize {
-        // Not used: puts use direct shard access via index.
-        unreachable!("offer arm selection not used")
+        // we always fail in offer anyways, no need to do any work here
+        let Some(item) = gambler.current_item.take() else {
+            unreachable!()
+        };
+        match item {
+            MaybeBatched::Batch(batch) => {
+                batch.starting_idx >> <BitsetStorage as ShardStorage>::SHARD_SHIFT
+            }
+            MaybeBatched::Single(index) => index >> <BitsetStorage as ShardStorage>::SHARD_SHIFT,
+        }
     }
 
     fn choose_poll_arm(
         &self,
-        _state: &impl kasino::storage::StorageBackend<
-            <Self::Gambler as kasino::strategy::Hooked>::Stake,
-        >,
-        _gambler: &mut Self::Gambler,
+        state: &impl kasino::storage::StorageBackend<<Self::Gambler as kasino::strategy::Hooked>::Stake>,
+        gambler: &mut Self::Gambler,
     ) -> usize {
-        // Not used: kasino's default `collect` tries all arms on pull failure.
-        unreachable!("poll arm selection not used")
+        self.scheduler.choose_poll_arm(state, &mut gambler.gambler)
     }
 
     fn fork_gambler(&self, parent: &Self::Gambler) -> Self::Gambler {
-        self.scheduler.fork_gambler(parent)
+        IndexPoolStrategyItemForwarder {
+            gambler: self.scheduler.fork_gambler(&parent.gambler),
+            current_item: None,
+        }
     }
 
     fn create_gambler(&self) -> Self::Gambler {
-        self.scheduler.create_gambler()
+        IndexPoolStrategyItemForwarder {
+            gambler: self.scheduler.create_gambler(),
+            current_item: None,
+        }
     }
 }
 
@@ -271,7 +311,6 @@ impl<S: Strategy<Q>, Q: Collection> Strategy<Q> for IndexPoolStrategy<S> {
 /// - `SHARDS`: Number of shards for contention reduction.
 /// - `WORDS_PER_SHARD`: Number of words per shard (default: [`WORDS_PER_CACHE_LINE`]).
 #[allow(private_bounds)]
-#[expect(dead_code, reason = "fields used via kasino's InlineBandit internals")]
 pub struct InlineKasinoSlotPool<
     S: Strategy<BitsetStorage<WORDS_PER_SHARD>>,
     const N: usize,
@@ -315,6 +354,25 @@ where
 {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<
+    S: Strategy<BitsetStorage<WORDS_PER_SHARD>>,
+    const N: usize,
+    const SHARDS: usize,
+    const WORDS_PER_SHARD: usize,
+> InlineKasinoSlotPool<S, N, SHARDS, WORDS_PER_SHARD>
+{
+    /// Creates a handle for accessing the pool.
+    ///
+    /// The handle provides the [`OwnedSlotPool`], [`RawOwnedSlotPool`], and
+    /// [`BatchedRawOwnedSlotPool`] trait implementations for interacting with the pool.
+    pub fn handle(&self) -> InlineKasinoSlotPoolHandle<'_, S, N, SHARDS, WORDS_PER_SHARD> {
+        InlineKasinoSlotPoolHandle {
+            bandit: self.bandit.buy_in(),
+            parent_id: self.id,
+        }
     }
 }
 
