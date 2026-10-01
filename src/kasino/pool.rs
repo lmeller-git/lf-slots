@@ -410,6 +410,23 @@ impl<
     const N: usize,
     const SHARDS: usize,
     const WORDS_PER_SHARD: usize,
+> InlineKasinoSlotPoolHandle<'a, S, N, SHARDS, WORDS_PER_SHARD>
+{
+    /// fewigf
+    pub fn fork(&mut self) -> Self {
+        Self {
+            bandit: self.bandit.fork(),
+            parent_id: self.parent_id,
+        }
+    }
+}
+
+impl<
+    'a,
+    S: Strategy<BitsetStorage<WORDS_PER_SHARD>>,
+    const N: usize,
+    const SHARDS: usize,
+    const WORDS_PER_SHARD: usize,
 > OwnedSlotPoolMeta for InlineKasinoSlotPoolHandle<'a, S, N, SHARDS, WORDS_PER_SHARD>
 {
     fn len(&mut self) -> usize {
@@ -476,4 +493,15 @@ impl<
     fn id(&mut self) -> ID {
         self.parent_id
     }
+}
+
+impl<
+    'a,
+    S: Strategy<BitsetStorage<WORDS_PER_SHARD>>,
+    const N: usize,
+    const SHARDS: usize,
+    const WORDS_PER_SHARD: usize,
+> BatchedOwnedSlotPool for InlineKasinoSlotPoolHandle<'a, S, N, SHARDS, WORDS_PER_SHARD>
+{
+    // Methods inherited from BatchedRawOwnedSlotPool and OwnedSlotPool
 }

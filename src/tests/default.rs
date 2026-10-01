@@ -179,6 +179,164 @@ mod inline {
     }
 }
 
+mod kasino_impls {
+    use crate::{define_inline_slots_kasino, kasino::pool::*, tests::stubs::kasino_tests::*};
+
+    define_inline_slots_kasino!(Storage2, 2);
+
+    define_inline_slots_kasino!(Storage10, 10);
+
+    #[cfg(not(miri))]
+    define_inline_slots_kasino!(Storage2000, 2000);
+    #[cfg(miri)]
+    define_inline_slots_kasino!(Storage2000, 20);
+
+    #[test]
+    fn smoke_impl() {
+        let storage: Storage2 = Storage2::new();
+        smoke(storage.handle());
+    }
+
+    #[test]
+    fn holds_n() {
+        define_inline_slots_kasino!(Storage42, 42);
+
+        let storage: Storage42 = Storage42::new();
+
+        while let Some(idx) = storage.handle().pull_raw() {
+            assert!(idx < 42);
+        }
+
+        for i in 0..42 {
+            // SAFETY:
+            // the cap is 43 and the pool is empty
+            unsafe { storage.handle().put_raw(i) };
+        }
+
+        while let Some(idx) = storage.handle().pull() {
+            assert!(idx.as_usize() < 42);
+        }
+    }
+
+    #[test]
+    fn order() {
+        let storage: Storage2000 = Storage2000::new();
+        for i in 0..storage.handle().capacity() {
+            assert_eq!(i, storage.handle().pull_raw().unwrap());
+        }
+    }
+
+    #[test]
+    fn pull_exact() {
+        let storage: Storage10 = Storage10::new();
+        let mut storage = storage.handle();
+
+        let batch5 = storage.pull_exact::<5>().unwrap();
+        assert_eq!(batch5.len(), 5);
+        assert_eq!(storage.len(), storage.capacity() - 5);
+        assert!(storage.pull_exact::<6>().is_none());
+        assert_eq!(storage.len(), storage.capacity() - 5);
+        let batch4 = storage.pull_exact::<4>().unwrap();
+        assert_eq!(batch4.len(), 4);
+        assert_eq!(storage.len(), 1);
+        let handle = storage.pull().unwrap();
+        assert!(storage.is_empty());
+
+        for h in batch4 {
+            storage.put(h).unwrap();
+        }
+
+        assert_eq!(storage.len(), 4);
+
+        for h in batch5 {
+            storage.put(h).unwrap();
+        }
+
+        storage.put(handle).unwrap();
+
+        assert!(storage.is_full());
+        assert!(storage.pull_exact::<42>().is_none());
+        assert!(storage.is_full());
+    }
+
+    #[test]
+    fn len_impl() {
+        let storage: Storage2 = Storage2::new();
+        len_empty_full(storage.handle());
+    }
+
+    #[test]
+    fn smoke_long_impl() {
+        let storage: Storage10 = Storage10::new();
+        smoke_long(storage.handle());
+    }
+
+    #[test]
+    fn spsc_impl() {
+        let storage: &Storage2000 = Box::leak(Box::new(Storage2000::new()));
+        let handle = storage.handle();
+        spsc(handle);
+    }
+
+    #[test]
+    fn mpsc_impl() {
+        let storage: &Storage2000 = Box::leak(Box::new(Storage2000::new()));
+        let handle = storage.handle();
+        mpsc(handle);
+    }
+
+    #[test]
+    fn mpmc_impl() {
+        let storage: &Storage2000 = Box::leak(Box::new(Storage2000::new()));
+        let handle = storage.handle();
+        mpmc(handle);
+    }
+
+    #[test]
+    fn linearizable_impl() {
+        let storage: &Storage10 = Box::leak(Box::new(Storage10::new()));
+        let handle = storage.handle();
+        linearizable(handle);
+    }
+
+    #[test]
+    fn smoke_batch_impl() {
+        let storage: &Storage2000 = Box::leak(Box::new(Storage2000::new()));
+        let handle = storage.handle();
+
+        batch_smoke(handle);
+    }
+
+    #[test]
+    fn batch_spsc_impl() {
+        let storage: &Storage2000 = Box::leak(Box::new(Storage2000::new()));
+        let handle = storage.handle();
+
+        batch_spsc(handle);
+    }
+
+    #[test]
+    fn batch_mpmc_impl() {
+        let storage: &Storage2000 = Box::leak(Box::new(Storage2000::new()));
+        let handle = storage.handle();
+        batch_mpmc(handle);
+    }
+
+    #[test]
+    fn exact_batch_mpmc_impl() {
+        let storage: &Storage2000 = Box::leak(Box::new(Storage2000::new()));
+        let handle = storage.handle();
+        exact_batch_mpmc(handle);
+    }
+
+    #[test]
+    fn mixed_mpmc_impl() {
+        let storage: &Storage2000 = Box::leak(Box::new(Storage2000::new()));
+        let handle = storage.handle();
+        mixed_mpmc(handle);
+    }
+}
+
 #[cfg(feature = "alloc")]
 mod heap {
     use super::*;
